@@ -156,6 +156,7 @@ update_iv:
 	return RX_CONTINUE;
 
 mic_fail:
+#ifdef CONFIG_ATBM_SUPPORT_MIC_FAILURE_REPORT
 	/*
 	 * In some cases the key can be unset - e.g. a multicast packet, in
 	 * a driver that supports HW encryption. Send up the key idx only if
@@ -164,6 +165,9 @@ mic_fail:
 	mac80211_ev_michael_mic_failure(rx->sdata,
 					rx->key ? rx->key->conf.keyidx : -1,
 					(void *) skb->data, NULL, GFP_ATOMIC);
+#else
+	atbm_printk_err("Mic Err\n");
+#endif
 	return RX_DROP_UNUSABLE;
 }
 
@@ -490,11 +494,11 @@ ieee80211_crypto_ccmp_decrypt(struct ieee80211_rx_data *rx)
 	if (memcmp(pn, key->u.ccmp.rx_pn[queue], CCMP_PN_LEN) == 0) {
 		if(memcmp(pn,zero_pn,CCMP_PN_LEN) != 0){
 			key->u.ccmp.replays++;
-			printk(KERN_ERR "%s:pn[%pM],rx_pn[%pM]\n",__func__,pn,key->u.ccmp.rx_pn[queue]);
+			atbm_printk_err("pn[%pM],rx_pn[%pM]\n",pn,key->u.ccmp.rx_pn[queue]);
 			return RX_DROP_UNUSABLE;
 		}
 		else {
-			printk(KERN_ERR "%s:rx_pn is zero\n",__func__);
+			atbm_printk_err("%s:rx_pn is zero\n",__func__);
 		}
 	}
 

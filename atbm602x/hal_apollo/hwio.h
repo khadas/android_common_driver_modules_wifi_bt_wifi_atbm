@@ -60,4 +60,12 @@ int atbm_after_load_firmware(struct atbm_common *hw_priv);
 void atbm_firmware_init_check(struct atbm_common *hw_priv);
 int atbm_reset_lmc_cpu(struct atbm_common *hw_priv);
 int atbm_reset_chip(struct atbm_common *hw_priv);
+
+#ifndef atbm_module_muxlock
+#define atbm_module_muxlock()
+#endif
+
+#ifndef atbm_module_muxunlock
+#define atbm_module_muxunlock()
+#endif
 #endif //ATBM_APOLLO_HWIO_H_INCLUDED

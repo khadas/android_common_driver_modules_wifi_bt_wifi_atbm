@@ -8,11 +8,11 @@
 #include "apollo_plat.h"
 
 #define ALTOBEAM_WIFI_HDR_FLAG  (0x34353677)
-#if ((PROJ_TYPE>=ARES_A) || (PROJ_TYPE==ATHENA_LITE_ECO))
-#define DOWNLOAD_ITCM_ADDR		(0x00010000)
-#else
-#define DOWNLOAD_ITCM_ADDR		(0x00000000)
-#endif 
+//#if ((PROJ_TYPE>=ARES_A) || (PROJ_TYPE==ATHENA_LITE_ECO))
+//#define DOWNLOAD_ITCM_ADDR		(0x00010000)
+//#else
+//#define DOWNLOAD_ITCM_ADDR		(0x00000000)
+//#endif 
 #define DOWNLOAD_ITCM_SIZE		(128*1024)
 #define DOWNLOAD_DTCM_ADDR		(0x00800000)
 #define DOWNLOAD_DTCM_SIZE		(48*1024)
@@ -35,4 +35,13 @@ int atbm_ep0_write(struct atbm_common *hw_priv, u32 addr,
 #ifdef USB_CMD_UES_EP0
 int atbm_ep0_write_cmd(struct atbm_common *hw_priv, struct wsm_hdr_tx * wsm_h);
 #endif
+/*
+*lock for probe dan disconnect
+*/
+extern void atbm_usb_module_muxlock(void);
+extern void atbm_usb_module_muxunlock(void);
+
+#define atbm_module_muxlock()			atbm_usb_module_muxlock()
+#define atbm_module_muxunlock()			atbm_usb_module_muxunlock()		
+	
 #endif //ATBM_APOLLO_HWIO_USB_H_INCLUDED

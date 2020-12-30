@@ -125,7 +125,9 @@ int atbm_queue_requeue(struct atbm_common *hw_priv,
 #else
 int atbm_queue_requeue(struct atbm_queue *queue, u32 packetID, bool check);
 #endif
+#if 0
 int atbm_queue_requeue_all(struct atbm_queue *queue);
+#endif
 #ifdef CONFIG_ATBM_APOLLO_TESTMODE
 int atbm_queue_remove(struct atbm_common *hw_priv,
 			struct atbm_queue *queue,

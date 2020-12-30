@@ -28,12 +28,19 @@
 struct atbm_scan {
 	struct semaphore lock;
 	struct work_struct work;
+#ifdef CONFIG_ATBM_SUPPORT_SCHED_SCAN
 #ifdef ROAM_OFFLOAD
 	struct work_struct swork; /* scheduled scan work */
 	struct cfg80211_sched_scan_request *sched_req;
 #endif /*ROAM_OFFLOAD*/
+#endif
 	struct delayed_work timeout;
+#ifdef CONFIG_ATBM_SCAN_SPLIT
+	struct delayed_work scan_spilt;
+	u8	   split;
+#endif
 	struct cfg80211_scan_request *req;
+	struct ieee80211_scan_req_wrap *req_wrap;
 	struct ieee80211_channel **begin;
 	struct ieee80211_channel **curr;
 	struct ieee80211_channel **end;
@@ -51,11 +58,14 @@ struct atbm_scan {
 	 struct work_struct smartsetChanwork;
 	 struct work_struct smartstopwork;
 	u8 scan_smartconfig;
+	u8 cca;
+	u8 passive;
 };
 
 int atbm_hw_scan(struct ieee80211_hw *hw,
 			struct ieee80211_vif *vif,
-			struct cfg80211_scan_request *req);
+			struct ieee80211_scan_req_wrap *req_wrap);
+#ifdef CONFIG_ATBM_SUPPORT_SCHED_SCAN
 #ifdef ROAM_OFFLOAD
 int atbm_hw_sched_scan_start(struct ieee80211_hw *hw,
 			struct ieee80211_vif *vif,
@@ -64,16 +74,22 @@ int atbm_hw_sched_scan_start(struct ieee80211_hw *hw,
 void atbm_hw_sched_scan_stop(struct atbm_common *priv);
 void atbm_sched_scan_work(struct work_struct *work);
 #endif /*ROAM_OFFLOAD*/
+#endif
 void atbm_scan_work(struct work_struct *work);
 void atbm_scan_timeout(struct work_struct *work);
 void etf_scan_end_work(struct work_struct *work);
 void atbm_scan_complete_cb(struct atbm_common *priv,
 				struct wsm_scan_complete *arg);
+#ifdef CONFIG_ATBM_SCAN_SPLIT
+void atbm_scan_split_work(struct work_struct *work);
+#endif
 
 /* ******************************************************************** */
 /* Raw probe requests TX workaround					*/
 void atbm_probe_work(struct work_struct *work);
+#ifdef CONFIG_ATBM_SUPPORT_P2P
 void atbm_scan_listenning_restart_delayed(struct atbm_vif *priv);
+#endif
 
 #ifdef CONFIG_ATBM_APOLLO_TESTMODE
 /* Advance Scan Timer							*/

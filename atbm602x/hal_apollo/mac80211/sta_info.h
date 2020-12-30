@@ -79,6 +79,11 @@ enum ieee80211_sta_info_flags {
 	WLAN_STA_PAIRWISE_KEY_SET,
 	WLAN_STA_WPA_RSN,
 	WLAN_STA_WPS,
+	WLAN_STA_40M_CH,
+	WLAN_STA_40M_CH_SEND_20M,
+	WLAN_STA_HANDSHAKE4OF4_SENDING,
+	WLAN_STA_HANDSHAKE4OF4_SUCCESS,
+	WLAN_STA_RESTART,
 };
 
 #define STA_TID_NUM 16
@@ -288,8 +293,9 @@ struct sta_info {
 	size_t associate_ie_len;
 	#endif
 	spinlock_t lock;
-
+#ifdef CONFIG_ATBM_MAC80211_NO_USE
 	struct work_struct drv_unblock_wk;
+#endif
 #ifdef CONFIG_MAC80211_ATBM_ROAMING_CHANGES
 	struct work_struct sta_free_wk;
 #endif
@@ -309,6 +315,7 @@ struct sta_info {
 	 */
 	struct sk_buff_head ps_tx_buf[IEEE80211_NUM_ACS];
 	struct sk_buff_head tx_filtered[IEEE80211_NUM_ACS];
+	struct sk_buff_head handshake_buffed;
 	unsigned long driver_buffered_tids;
 
 	/* Updated from RX path only, no locking requirements */
@@ -320,7 +327,9 @@ struct sta_info {
 	unsigned long rx_fragments;
 	unsigned long rx_dropped;
 	int last_signal;
+	int last_signal2;
 	struct atbm_ewma avg_signal;
+	struct atbm_ewma avg_signal2;
 	/* Plus 1 for non-QoS frames */
 	__le16 last_seq_ctrl[NUM_RX_DATA_QUEUES + 1];
 
@@ -374,7 +383,8 @@ struct sta_info {
 
 	/* should be right in front of sta to be in the same cache line */
 	bool dummy;
-
+	u8 	mic_len;
+	u8  handshake_state;
 	/* keep last! */
 	struct ieee80211_sta sta;
 };
@@ -410,7 +420,7 @@ static inline int test_and_clear_sta_flag(struct sta_info *sta,
 {
 	return test_and_clear_bit(flag, &sta->_flags);
 }
-
+#ifdef CONFIG_ATBM_SW_AGGTX
 void ieee80211_assign_tid_tx(struct sta_info *sta, int tid,
 			     struct tid_ampdu_tx *tid_tx);
 
@@ -421,7 +431,7 @@ rcu_dereference_protected_tid_tx(struct sta_info *sta, int tid)
 					 lockdep_is_held(&sta->lock) ||
 					 lockdep_is_held(&sta->ampdu_mlme.mtx));
 }
-
+#endif
 #define STA_HASH_SIZE 256
 #define STA_HASH(sta) (sta[5])
 
@@ -535,5 +545,6 @@ void ieee80211_sta_ps_deliver_uapsd(struct sta_info *sta);
 #ifdef CONFIG_MAC80211_ATBM_ROAMING_CHANGES
 void sta_info_free_rcu(struct rcu_head *rcu_h);
 #endif
+void sta_info_set_mgmt_suit(struct sta_info *sta,struct cfg80211_crypto_settings *settings);
 
 #endif /* STA_INFO_H */

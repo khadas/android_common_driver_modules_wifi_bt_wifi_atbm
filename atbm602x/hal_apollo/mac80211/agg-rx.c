@@ -73,20 +73,20 @@ void ___ieee80211_stop_rx_ba_session(struct sta_info *sta, u16 tid,
 	RCU_INIT_POINTER(sta->ampdu_mlme.tid_rx[tid], NULL);
 
 #ifdef CONFIG_MAC80211_ATBM_HT_DEBUG
-	printk(KERN_DEBUG "Rx BA session stop requested for %pM tid %u\n",
+	atbm_printk_agg("Rx BA session stop requested for %pM tid %u\n",
 	       sta->sta.addr, tid);
 #endif /* CONFIG_MAC80211_ATBM_HT_DEBUG */
 
 	if (drv_ampdu_action(local, sta->sdata, IEEE80211_AMPDU_RX_STOP,
 			     &sta->sta, tid, NULL, 0))
-		printk(KERN_DEBUG "HW problem - can not stop rx "
+		atbm_printk_agg( "HW problem - can not stop rx "
 				"aggregation for tid %d\n", tid);
-
+#ifdef CONFIG_ATBM_DRIVER_PROCESS_BA
 	/* check if this is a self generated aggregation halt */
 	if (initiator == WLAN_BACK_RECIPIENT && tx)
 		ieee80211_send_delba(sta->sdata, sta->sta.addr,
 				     tid, 0, reason);
-
+#endif
 	del_timer_sync(&tid_rx->session_timer);
 	del_timer_sync(&tid_rx->reorder_timer);
 
@@ -100,7 +100,7 @@ void __ieee80211_stop_rx_ba_session(struct sta_info *sta, u16 tid,
 	___ieee80211_stop_rx_ba_session(sta, tid, initiator, reason, tx);
 	mutex_unlock(&sta->ampdu_mlme.mtx);
 }
-
+#ifdef CONFIG_ATBM_MAC80211_NO_USE
 void ieee80211_stop_rx_ba_session(struct ieee80211_vif *vif, u16 ba_rx_bitmap,
 				  const u8 *addr)
 {
@@ -123,7 +123,7 @@ void ieee80211_stop_rx_ba_session(struct ieee80211_vif *vif, u16 ba_rx_bitmap,
 	rcu_read_unlock();
 }
 //EXPORT_SYMBOL(ieee80211_stop_rx_ba_session);
-
+#endif
 /*
  * After accepting the AddBA Request we activated a timer,
  * resetting it after each frame that arrives from the originator.
@@ -140,7 +140,7 @@ static void sta_rx_agg_session_timer_expired(unsigned long data)
 					 timer_to_tid[0]);
 
 #ifdef CONFIG_MAC80211_ATBM_HT_DEBUG
-	printk(KERN_DEBUG "rx session timer expired on tid %d\n", (u16)*ptid);
+	atbm_printk_agg("rx session timer expired on tid %d\n", (u16)*ptid);
 #endif
 	set_bit(*ptid, sta->ampdu_mlme.tid_rx_timer_expired);
 	ieee80211_queue_work(&sta->local->hw, &sta->ampdu_mlme.work);
@@ -157,7 +157,7 @@ static void sta_rx_agg_reorder_timer_expired(unsigned long data)
 	ieee80211_release_reorder_timeout(sta, *ptid);
 	rcu_read_unlock();
 }
-
+#ifdef CONFIG_ATBM_DRIVER_PROCESS_BA
 static void ieee80211_send_addba_resp(struct ieee80211_sub_if_data *sdata, u8 *da, u16 tid,
 				      u8 dialog_token, u16 status, u16 policy,
 				      u16 buf_size, u16 timeout)
@@ -200,7 +200,7 @@ static void ieee80211_send_addba_resp(struct ieee80211_sub_if_data *sdata, u8 *d
 
 	ieee80211_tx_skb(sdata, skb);
 }
-
+#endif
 void ieee80211_process_addba_request(struct ieee80211_local *local,
 				     struct sta_info *sta,
 				     struct atbm_ieee80211_mgmt *mgmt,
@@ -226,7 +226,7 @@ void ieee80211_process_addba_request(struct ieee80211_local *local,
 
 	if (test_sta_flag(sta, WLAN_STA_BLOCK_BA)) {
 #ifdef CONFIG_MAC80211_ATBM_HT_DEBUG
-		printk(KERN_DEBUG "Suspend in progress. "
+		atbm_printk_agg("Suspend in progress. "
 		       "Denying ADDBA request\n");
 #endif
 		goto end_no_lock;
@@ -242,7 +242,7 @@ void ieee80211_process_addba_request(struct ieee80211_local *local,
 		status = WLAN_STATUS_INVALID_QOS_PARAM;
 #ifdef CONFIG_MAC80211_ATBM_HT_DEBUG
 		if (net_ratelimit())
-			printk(KERN_DEBUG "AddBA Req with bad params from "
+			atbm_printk_agg( "AddBA Req with bad params from "
 				"%pM on tid %u. policy %d, buffer size %d\n",
 				mgmt->sa, tid, ba_policy,
 				buf_size);
@@ -263,7 +263,7 @@ void ieee80211_process_addba_request(struct ieee80211_local *local,
 	if (sta->ampdu_mlme.tid_rx[tid]) {
 #ifdef CONFIG_MAC80211_ATBM_HT_DEBUG
 		if (net_ratelimit())
-			printk(KERN_DEBUG "unexpected AddBA Req from "
+			atbm_printk_agg( "unexpected AddBA Req from "
 				"%pM on tid %u\n",
 				mgmt->sa, tid);
 #endif /* CONFIG_MAC80211_ATBM_HT_DEBUG */
@@ -306,7 +306,7 @@ void ieee80211_process_addba_request(struct ieee80211_local *local,
 	ret = drv_ampdu_action(local, sta->sdata, IEEE80211_AMPDU_RX_START,
 			       &sta->sta, tid, &start_seq_num, 0);
 #ifdef CONFIG_MAC80211_ATBM_HT_DEBUG
-	printk(KERN_DEBUG "Rx A-MPDU request on tid %d result %d\n", tid, ret);
+	atbm_printk_agg( "Rx A-MPDU request on tid %d result %d\n", tid, ret);
 #endif /* CONFIG_MAC80211_ATBM_HT_DEBUG */
 
 	if (ret) {
@@ -335,6 +335,9 @@ end:
 	mutex_unlock(&sta->ampdu_mlme.mtx);
 
 end_no_lock:
+#ifdef CONFIG_ATBM_DRIVER_PROCESS_BA
 	ieee80211_send_addba_resp(sta->sdata, sta->sta.addr, tid,
 				  dialog_token, status, 1, buf_size, timeout);
+#endif
+	return;
 }

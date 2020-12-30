@@ -42,5 +42,7 @@ int atbm_get_hw_type(u32 config_reg_val, int *major_revision);
 int atbm_load_firmware(struct atbm_common *hw_priv);
 void atbm_release_firmware(void);
 int atbm_init_firmware(void);
-
+#ifdef CONFIG_PM_SLEEP
+int atbm_cache_fw_before_suspend(struct device	 *pdev);
+#endif
 #endif

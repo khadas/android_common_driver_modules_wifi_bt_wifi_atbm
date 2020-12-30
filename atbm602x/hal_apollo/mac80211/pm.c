@@ -5,7 +5,7 @@
 #include "mesh.h"
 #include "driver-ops.h"
 #include "led.h"
-
+#if defined (ATBM_SUSPEND_REMOVE_INTERFACE) || defined (ATBM_SUPPORT_WOW)
 /* return value indicates whether the driver should be further notified */
 static bool ieee80211_quiesce(struct ieee80211_sub_if_data *sdata)
 {
@@ -13,12 +13,16 @@ static bool ieee80211_quiesce(struct ieee80211_sub_if_data *sdata)
 	case NL80211_IFTYPE_STATION:
 		ieee80211_sta_quiesce(sdata);
 		return true;
+#ifdef CONFIG_ATBM_SUPPORT_IBSS
 	case NL80211_IFTYPE_ADHOC:
 		ieee80211_ibss_quiesce(sdata);
 		return true;
+#endif
+#ifdef CONFIG_MAC80211_ATBM_MESH
 	case NL80211_IFTYPE_MESH_POINT:
 		ieee80211_mesh_quiesce(sdata);
 		return true;
+#endif
 	case NL80211_IFTYPE_AP_VLAN:
 	case NL80211_IFTYPE_MONITOR:
 		/* don't tell driver about this */
@@ -27,7 +31,32 @@ static bool ieee80211_quiesce(struct ieee80211_sub_if_data *sdata)
 		return true;
 	}
 }
+#endif
+static void ieee80211_suspend_sta_disconnect(struct ieee80211_sub_if_data *sdata)
+{
+	struct ieee80211_local *local = sdata->local;
+	struct sta_info *sta;
 
+	if(sdata->vif.type == NL80211_IFTYPE_STATION){
+		if(!(sdata->flags & IEEE80211_SDATA_DISCONNECT_RESUME))
+			ieee80211_connection_loss(&sdata->vif);
+	}else if(sdata->vif.type == NL80211_IFTYPE_AP){	
+		mutex_lock(&local->sta_mtx);
+		list_for_each_entry(sta, &local->sta_list, list) {
+			if ((sta->uploaded)&&(sta->sdata == sdata)) {				
+				WARN_ON(ieee80211_rx_sta_cook_deauthen(sta)==false);
+				WARN_ON(ieee80211_tx_sta_deauthen(sta)==false);		
+			}
+		}
+		mutex_unlock(&local->sta_mtx);		
+	}
+
+	flush_workqueue(local->workqueue);
+
+	drv_flush(local, sdata, false);
+	sta_info_flush(local, sdata);
+	synchronize_net();
+}
 int __ieee80211_suspend(struct ieee80211_hw *hw, struct cfg80211_wowlan *wowlan)
 {
 	struct ieee80211_local *local = hw_to_local(hw);
@@ -48,8 +77,7 @@ int __ieee80211_suspend(struct ieee80211_hw *hw, struct cfg80211_wowlan *wowlan)
 	if (mutex_trylock(&local->mtx))
 		mutex_unlock(&local->mtx);
 	else {
-		wiphy_warn(hw->wiphy, "Suspend when operation "
-			"is in progress. Suspend aborted.\n");
+		atbm_printk_warn("Suspend when operation is in progress. Suspend aborted.\n");
 		return -EBUSY;
 	}
 
@@ -67,7 +95,6 @@ int __ieee80211_suspend(struct ieee80211_hw *hw, struct cfg80211_wowlan *wowlan)
 
 		if(local->pending_scan_sdata&&(local->pending_scan_sdata == sdata))
 		{
-			printk("cancle pendding scan request\n");
 			local->scan_sdata = local->pending_scan_sdata;
 			local->scan_req = local->pending_scan_req;
 			local->pending_scan_sdata = NULL;
@@ -76,7 +103,15 @@ int __ieee80211_suspend(struct ieee80211_hw *hw, struct cfg80211_wowlan *wowlan)
 		}
 		
 		ieee80211_work_purge(sdata);
+#ifdef CONFIG_ATBM_SUPPORT_P2P
 		ieee80211_roc_purge(sdata);
+#endif
+#ifdef ATBM_SUPPORT_WOW
+		if(wowlan == NULL)
+#endif
+		{
+			ieee80211_suspend_sta_disconnect(sdata);
+		}
 	}
 	if (hw->flags & IEEE80211_HW_AMPDU_AGGREGATION) {
 		mutex_lock(&local->sta_mtx);
@@ -103,7 +138,7 @@ int __ieee80211_suspend(struct ieee80211_hw *hw, struct cfg80211_wowlan *wowlan)
 
 	/* Don't try to run timers while suspended. */
 	del_timer_sync(&local->sta_cleanup);
-
+#ifdef CONFIG_ATBM_MAC80211_NO_USE
 	 /*
 	 * Note that this particular timer doesn't need to be
 	 * restarted at resume.
@@ -112,12 +147,13 @@ int __ieee80211_suspend(struct ieee80211_hw *hw, struct cfg80211_wowlan *wowlan)
 		cancel_work_sync(&sdata->dynamic_ps_enable_work);
 		del_timer_sync(&sdata->dynamic_ps_timer);
 	}
-
+#endif
 	local->wowlan = wowlan && local->open_count;
-	printk(KERN_ERR "%s:wowlan(%d)\n",__func__,local->wowlan);
+	atbm_printk_pm( "enable wowlan(%d)\n",local->wowlan);
 #ifndef ATBM_SUPPORT_WOW
 	local->wowlan = 0;
 #endif
+#ifdef ATBM_SUPPORT_WOW
 	if (local->wowlan) {
 		int err = drv_suspend(local, wowlan);
 		if (err < 0) {
@@ -140,8 +176,10 @@ int __ieee80211_suspend(struct ieee80211_hw *hw, struct cfg80211_wowlan *wowlan)
 		}
 		goto suspend;
 	}
+#endif
 #ifdef ATBM_SUSPEND_REMOVE_INTERFACE
 	/* disable keys */
+	#pragma message("Suspend Remove Interface")
 	list_for_each_entry(sdata, &local->interfaces, list)
 		ieee80211_disable_keys(sdata);
 
@@ -191,7 +229,9 @@ int __ieee80211_suspend(struct ieee80211_hw *hw, struct cfg80211_wowlan *wowlan)
 			if (!ieee80211_sdata_running(sdata))
 				continue;
 			ieee80211_work_purge(sdata);
+#ifdef CONFIG_ATBM_SUPPORT_P2P
 			ieee80211_roc_purge(sdata);
+#endif
 		}
 		ieee80211_scan_cancel(local);
 		err = drv_suspend(local, NULL);
@@ -202,11 +242,11 @@ int __ieee80211_suspend(struct ieee80211_hw *hw, struct cfg80211_wowlan *wowlan)
 	/* need suspended to be visible before quiescing is false */
 	barrier();
 	local->quiescing = false;
-
+#ifdef CONFIG_ATBM_SUPPORT_SCHED_SCAN
 #ifdef ROAM_OFFLOAD
 	local->sched_scanning = true;
 #endif /*ROAM_OFFLOAD*/
-
+#endif
 	return 0;
 }
 

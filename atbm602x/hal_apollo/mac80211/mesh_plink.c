@@ -14,7 +14,7 @@
 #include "mesh.h"
 
 #ifdef CONFIG_MAC80211_ATBM_VERBOSE_MPL_DEBUG
-#define mpl_dbg(fmt, args...)	printk(KERN_DEBUG fmt, ##args)
+#define mpl_dbg(fmt, args...)	atbm_printk_always(fmt, ##args)
 #else
 #define mpl_dbg(fmt, args...)	do { (void)(0); } while (0)
 #endif
@@ -97,8 +97,9 @@ static struct sta_info *mesh_plink_alloc(struct ieee80211_sub_if_data *sdata,
 	set_sta_flag(sta, WLAN_STA_AUTHORIZED);
 	set_sta_flag(sta, WLAN_STA_WME);
 	sta->sta.supp_rates[chan_state->conf.channel->band] = rates;
+#ifndef CONFIG_RATE_HW_CONTROL
 	rate_control_rate_init(sta);
-
+#endif
 	return sta;
 }
 

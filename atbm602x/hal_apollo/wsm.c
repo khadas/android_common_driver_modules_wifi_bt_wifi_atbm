@@ -28,15 +28,17 @@
 #include "mac80211/ieee80211_i.h"
 #include "mac80211/rc80211_minstrel.h"
 #include "mac80211/rc80211_minstrel_ht.h"
+
 #ifdef ATBM_SUPPORT_SMARTCONFIG
 extern int smartconfig_start_rx(struct atbm_common *hw_priv,struct sk_buff *skb,int channel );
 #endif
 
 extern void etf_v2_scan_rx(struct atbm_common *hw_priv,struct sk_buff *skb,u8 rssi );
-
+#ifdef CONFIG_ATBM_SUPPORT_SCHED_SCAN
 #ifdef ROAM_OFFLOAD
 #include "sta.h"
 #endif /*ROAM_OFFLOAD*/
+#endif
 //#define CONFIG_ATBM_APOLLO_WSM_DEBUG
 #if defined(CONFIG_ATBM_APOLLO_WSM_DEBUG)
 #define wsm_printk  printk
@@ -127,6 +129,20 @@ static int wsm_cmd_send(struct atbm_common *hw_priv,
 static struct atbm_vif
 	*wsm_get_interface_for_tx(struct atbm_common *hw_priv);
 
+/**********************/
+//1: Exception  0: Normal
+int wifi_run_sta = 0;
+void atbm_wifi_run_status_set(int status)
+{
+	wifi_run_sta = status;
+	return;
+}
+int atbm_wifi_run_status_get(void)
+{
+	return wifi_run_sta;
+}
+/***********************/
+
 static inline void wsm_cmd_lock(struct atbm_common *hw_priv)
 {
 	mutex_lock(&hw_priv->wsm_cmd_mux);
@@ -165,22 +181,24 @@ static int wsm_stop_scan_confirm(struct atbm_common *hw_priv,
 {
 	u32 status = WSM_GET32(buf);
 	
-	printk("wsm_stop_scan_confirm %x wait_complete %d\n",status,hw_priv->scan.wait_complete);
+	atbm_printk_scan("wsm_stop_scan_confirm %x wait_complete %d\n",status,hw_priv->scan.wait_complete);
 	if (status == WSM_STATUS_NOEFFECT){
 		
 		if(hw_priv->scan.wait_complete)
 		{
-			#ifdef ROAM_OFFLOAD
-				if(hw_priv->auto_scanning == 0)
-					wsm_oper_unlock(hw_priv);
-			#else
+#ifdef CONFIG_ATBM_SUPPORT_SCHED_SCAN
+#ifdef ROAM_OFFLOAD
+			if(hw_priv->auto_scanning == 0)
 				wsm_oper_unlock(hw_priv);
-			#endif /*ROAM_OFFLOAD*/
+#else
+			wsm_oper_unlock(hw_priv);
+#endif /*ROAM_OFFLOAD*/
+#endif
 		}
 		
 	}
 	else if (status != WSM_STATUS_SUCCESS){
-		printk(KERN_ERR "%s:status(%d)\n",__func__,status);
+		atbm_printk_scan("%s:status(%d)\n",__func__,status);
 		return -EINVAL;
 	}
 	return 0;
@@ -199,7 +217,7 @@ static int wsm_generic_confirm(struct atbm_common *hw_priv,
 {
 	u32 status = WSM_GET32(buf);
 	if (status != WSM_STATUS_SUCCESS){
-		printk(KERN_ERR "%s:status(%d)\n",__func__,status);
+		atbm_printk_err( "%s:status(%d)\n",__func__,status);
 		return -EINVAL;
 	}
 	return 0;
@@ -382,12 +400,12 @@ int wsm_write_mib(struct atbm_common *hw_priv, u16 mibId, void *_buf,
 	return ret;
 
 nomem:
-	printk("<WARNING> wsm_write_mib fail !!! mibId=%d\n",mibId);
+	atbm_printk_err("<WARNING> wsm_write_mib fail !!! mibId=%d\n",mibId);
 	wsm_cmd_unlock(hw_priv);
 	return -ENOMEM;
 
 disconnect:
-	printk("<WARNING> wsm_write_mib fail !!! mibId=%d, HIF disconnect\n",mibId);
+	atbm_printk_err("<WARNING> wsm_write_mib fail !!! mibId=%d, HIF disconnect\n",mibId);
 	wsm_cmd_unlock(hw_priv);
 	return 0;
 
@@ -438,13 +456,16 @@ extern struct sk_buff *ieee80211_probereq_get_etf_v2(struct ieee80211_hw *hw,
 				       struct ieee80211_vif *vif,
 				       const u8 *ssid, size_t ssid_len,
 				       size_t total_len);
-
+#ifdef CONFIG_ATBM_PRODUCT_TEST_USE_GOLDEN_LED
 extern struct sk_buff *ieee80211_probereq_get_etf_for_send_result(struct ieee80211_hw *hw,
 				       struct ieee80211_vif *vif,
 				       const u8 *ssid, size_t ssid_len,
 				       size_t total_len);
+#endif
 int wsm_start_tx_param_set(struct atbm_common *hw_priv, struct ieee80211_vif *vif,bool start)
 {
+	int ret = 0;
+	u32 len = 0;
 	struct wsm_set_chantype arg = {
 	.band = 0,			//0:2.4G,1:5G
 	.flag = start? BIT(WSM_SET_CHANTYPE_FLAGS__ETF_TEST_START):0,			//no use
@@ -455,8 +476,7 @@ int wsm_start_tx_param_set(struct atbm_common *hw_priv, struct ieee80211_vif *vi
 	struct wsm_template_frame frame = {
 		.frame_type = WSM_FRAME_TYPE_PROBE_REQUEST,
 	};
-	u32 len = hw_priv->etf_len;	
-	int ret;
+	len = hw_priv->etf_len;	
 
 	if(hw_priv->etf_greedfiled == 1){
 		arg.flag |= BIT(WSM_SET_CHANTYPE_FLAGS__ETF_GREEDFILED);
@@ -464,11 +484,11 @@ int wsm_start_tx_param_set(struct atbm_common *hw_priv, struct ieee80211_vif *vi
 
 	//printk("hw_priv->etf_greedfiled:%d\n", hw_priv->etf_greedfiled);
 	
-	printk("etf_channel = %d etf_channel_type %d\n", hw_priv->etf_channel,hw_priv->etf_channel_type);
-	wsm_set_chantype_func(hw_priv,&arg,0);
+	atbm_printk_always("etf_channel = %d etf_channel_type %d\n", hw_priv->etf_channel,hw_priv->etf_channel_type);
+	ret = wsm_set_chantype_func(hw_priv,&arg,0);
 
 	if(start==0)
-		return 1;
+		return ret;
 
 	if(len>1000)
 		len = 1000;
@@ -483,13 +503,13 @@ int wsm_start_tx_param_set(struct atbm_common *hw_priv, struct ieee80211_vif *vi
 		atbm_dev_kfree_skb(frame.skb);
 	
 	
-	return 1;
-
-
+	return ret;
 }
+
 
 int wsm_start_tx_param_set_v2(struct atbm_common *hw_priv, struct ieee80211_vif *vif,bool start)
 {
+	int ret = 0;
 	struct wsm_set_chantype arg = {
 	.flag = start? BIT(WSM_SET_CHANTYPE_PRB_TPC):0,			//probreq use tpc
 	};
@@ -499,20 +519,20 @@ int wsm_start_tx_param_set_v2(struct atbm_common *hw_priv, struct ieee80211_vif 
 		.frame_type = WSM_FRAME_TYPE_PROBE_REQUEST,
 	};
 
-	wsm_set_chantype_func(hw_priv,&arg,0);
+	ret = wsm_set_chantype_func(hw_priv,&arg,0);
 	//printk("wsm_start_tx_param_set_v2\n");
 	frame.skb = ieee80211_probereq_get_etf_v2(hw_priv->hw, vif, "tttttttt", 0,1000);
-
-	 wsm_set_template_frame(hw_priv, &frame, 0);
+	if(ret == 0)
+		ret = wsm_set_template_frame(hw_priv, &frame, 0);
 	if (frame.skb)
 		atbm_dev_kfree_skb(frame.skb);
 	
 	
-	return 1;
+	return ret;
 
 
 }
-
+#ifdef CONFIG_ATBM_PRODUCT_TEST_USE_GOLDEN_LED
 int wsm_send_result_param_set(struct atbm_common *hw_priv, struct ieee80211_vif *vif,bool start)
 {
 	struct wsm_set_chantype arg = {
@@ -536,8 +556,7 @@ int wsm_send_result_param_set(struct atbm_common *hw_priv, struct ieee80211_vif 
 
 
 }
-
-
+#endif
 int wsm_start_scan_etf(struct atbm_common *hw_priv, struct ieee80211_vif *vif )
 {
 	
@@ -580,6 +599,7 @@ int wsm_start_scan_etf(struct atbm_common *hw_priv, struct ieee80211_vif *vif )
 	return wsm_scan(hw_priv,&scan,0);
 }
 
+
 int wsm_start_scan_etf_v2(struct atbm_common *hw_priv, struct ieee80211_vif *vif )
 {
 	
@@ -617,7 +637,7 @@ int wsm_start_scan_etf_v2(struct atbm_common *hw_priv, struct ieee80211_vif *vif
 
 	return wsm_scan(hw_priv,&scan,0);
 }
-
+#ifdef CONFIG_ATBM_PRODUCT_TEST_USE_GOLDEN_LED
 int wsm_send_result_start_scan_etf(struct atbm_common *hw_priv, struct ieee80211_vif *vif )
 {
 	
@@ -655,35 +675,59 @@ int wsm_send_result_start_scan_etf(struct atbm_common *hw_priv, struct ieee80211
 
 	return wsm_scan(hw_priv,&scan,0);
 }
+#endif
+//get efuse remain bits
+int wsm_get_efuse_status(struct atbm_common *hw_priv, struct ieee80211_vif *vif )
+{
+	int remainBit = 0;
+	//struct efuse_headr efuse_temp;
+	//memset(&efuse_temp, 0, sizeof(struct efuse_headr));
+	wsm_get_efuse_remain_bit(hw_priv, &remainBit, sizeof(int));
+	//printk("remainBit:%d\n", remainBit);
+
+	return remainBit;
+}
 
 
 int wsm_start_tx(struct atbm_common *hw_priv, struct ieee80211_vif *vif )
 {
+	int ret = 0;
 	hw_priv->bStartTx = 1;
 	hw_priv->bStartTxWantCancel = 0;
 	hw_priv->etf_test_v2 =0;
-	wsm_start_tx_param_set(hw_priv,vif,1);
-	wsm_start_scan_etf(hw_priv,vif);
+	ret = wsm_start_tx_param_set(hw_priv,vif,1);
+	if(ret == 0)
+		ret = wsm_start_scan_etf(hw_priv,vif);
 
-	return 0;
+	return ret;
 }
 
-extern void atbm_etf_test_expire_timer(unsigned long arg);
-extern u8 DCXOCodeRead(struct atbm_common *hw_priv);
-extern int DCXOCodeWrite(struct atbm_common *hw_priv,u8 data);
 
+extern u32 chipversion;
+extern struct efuse_headr efuse_data_etf;
 int wsm_start_tx_v2(struct atbm_common *hw_priv, struct ieee80211_vif *vif )
 {
-	struct efuse_headr efuse_data;
 //	u8 CodeValue;
+	int ret = 0;
+	int efuse_remainbit = 0;
 	hw_priv->bStartTx = 1;
 	hw_priv->bStartTxWantCancel = 1;
 	hw_priv->etf_test_v2 =1;
+	
+	efuse_remainbit = wsm_get_efuse_status(hw_priv, vif);
+	printk("efuse remain bit:%d\n", efuse_remainbit);
 
-	wsm_get_efuse_data(hw_priv,(void *)&efuse_data,sizeof(struct efuse_headr));
-	if(efuse_data.version != 0)
+	memset(&efuse_data_etf, 0, sizeof(struct efuse_headr));
+	ret = wsm_get_efuse_data(hw_priv,(void *)&efuse_data_etf,sizeof(struct efuse_headr));
+	if(chipversion == 0x24)
 	{
-		printk("This board already tested and passed!\n");
+		if(efuse_remainbit <= 12)
+			atbm_printk_always("This board already tested and passed!\n");
+	}
+	else if(chipversion == 0x49)
+	{
+		if(efuse_remainbit <= 503)
+			atbm_printk_always("This board already tested and passed!\n");
 	}
 
 	//init_timer(&hw_priv->etf_expire_timer);	
@@ -691,18 +735,30 @@ int wsm_start_tx_v2(struct atbm_common *hw_priv, struct ieee80211_vif *vif )
 	//hw_priv->etf_expire_timer.data = (unsigned long)hw_priv;
 	//hw_priv->etf_expire_timer.function = atbm_etf_test_expire_timer;
 	//add_timer(&hw_priv->etf_expire_timer);
-	
-	wsm_start_tx_param_set_v2(hw_priv,vif,1);
-	wsm_start_scan_etf_v2(hw_priv,vif);
+	if(ret == 0)
+	{
+		ret = wsm_start_tx_param_set_v2(hw_priv,vif,1);
+		if(ret == 0)
+			ret = wsm_start_scan_etf_v2(hw_priv,vif);
+		else
+			atbm_printk_err("%s:%d\n", __func__, __LINE__);
+	}
+	else
+	{
+		atbm_printk_err("%s:%d\n", __func__, __LINE__);
+	}
 
-	return 0;
+	return ret;
 }
-
+#ifdef CONFIG_ATBM_PRODUCT_TEST_USE_GOLDEN_LED
 int wsm_send_result(struct atbm_common *hw_priv, struct ieee80211_vif *vif )
 {
-	hw_priv->bStartTx = 1;
-	hw_priv->bStartTxWantCancel = 1;
-	hw_priv->etf_test_v2 =1;
+	//hw_priv->bStartTx = 1;
+	/* sigmastar test:send package for control golden`s led, and golden do not send response,
+		so bStartTxWantCancel must set 0
+	*/
+	//hw_priv->bStartTxWantCancel = 1;//bStartTxWantCancel=1:get rxrssi and rxevm from lmc
+	//hw_priv->etf_test_v2 =1;
 
 	
 	wsm_send_result_param_set(hw_priv,vif,1);
@@ -710,8 +766,7 @@ int wsm_send_result(struct atbm_common *hw_priv, struct ieee80211_vif *vif )
 
 	return 0;
 }
-
-
+#endif
 int wsm_stop_tx(struct atbm_common *hw_priv)
 {
 	int ret = 0;
@@ -720,11 +775,6 @@ int wsm_stop_tx(struct atbm_common *hw_priv)
 	wsm_start_tx_param_set(hw_priv,priv->vif,0);
 	//hw_priv->bStartTx = 0;
 	hw_priv->bStartTxWantCancel = 1;
-
-        if(hw_priv->etf_rate >= WSM_TRANSMIT_RATE_HT_6)
-	{
-          up(&hw_priv->scan.lock);
-        }
 	return ret;
 }
 
@@ -738,7 +788,6 @@ int wsm_scan(struct atbm_common *hw_priv, const struct wsm_scan *arg,
 	int ret;
 	struct wsm_buf *buf = &hw_priv->wsm_cmd_buf;
 
-
 	if (unlikely(arg->numOfChannels > 48))
 		return -EINVAL;
 
@@ -750,7 +799,6 @@ int wsm_scan(struct atbm_common *hw_priv, const struct wsm_scan *arg,
 
 	wsm_oper_lock(hw_priv);
 	wsm_cmd_lock(hw_priv);
-
 	WSM_PUT8(buf, arg->band);
 	WSM_PUT8(buf, arg->scanType);
 	WSM_PUT8(buf, arg->scanFlags);
@@ -821,49 +869,66 @@ void wsm_sync_channl_reset(struct work_struct *work)
 	u32 buf[DOWNLOAD_BLOCK_SIZE/4];
 	struct atbm_SdioCmd *cmd = (struct atbm_SdioCmd *)buf;
 	struct wsm_hdr_tx *wsm_tx;
+	u32 wsm_flag_u32 = 0;
+	u16 wsm_len_u16[2];
+	u16 wsm_len_sum;
 	int ret;
 	u32 val;
 	int loop=100;
 	int retry=0;
 	u8 forcePacket[16]={0};
-	printk(KERN_ERR "wsm_recovery++\n");
+	atbm_printk_err( "wsm_recovery++\n");
 	
 	if(atbm_bh_is_term(hw_priv)){
-		printk(KERN_ERR "wsm_sync_channl start error \n");
+		atbm_printk_err( "wsm_sync_channl start error \n");
 		return;
 	}
-	atbm_bh_suspend(hw_priv); 
+	wsm_lock_tx_async(hw_priv);
+	ret=atbm_bh_suspend(hw_priv); 
     hw_priv->sbus_ops->lock(hw_priv->sbus_priv);
-	wsm_lock_tx_async(hw_priv);	
 	//Do force Packet,just hw_version >=aresB have register 
 	wsm_tx=(struct wsm_hdr_tx*)&forcePacket[0];
-	wsm_tx->flag=__cpu_to_le32(0x1000);
+	wsm_flag_u32 = (0x10) & 0xffff;
+	wsm_len_u16[0] = wsm_flag_u32 & 0xff;
+	wsm_len_u16[1] = (wsm_flag_u32 >> 8)& 0xff;
+	wsm_len_sum = wsm_len_u16[0] + wsm_len_u16[1];
+	if (wsm_len_sum & BIT(8))
+	{
+		wsm_flag_u32 |= ((wsm_len_sum + 1) & 0xff) << 24;
+	}else
+	{
+		wsm_flag_u32 |= (wsm_len_sum & 0xff) << 24;
+	}
+	wsm_tx->flag=__cpu_to_le32(wsm_flag_u32);
 	wsm_tx->len=0x10;;
 	wsm_tx->id=0x55aa;
 	do{
 		ret=atbm_direct_read_unlock(hw_priv,0xab0016c,&val);
 		if(ret<0){
-			printk(KERN_ERR "Error %d\n",__LINE__);
+			atbm_printk_err( "Error %d\n",__LINE__);
 			continue;
 		}
 		if((val&0xe)==0x0){
-			printk(KERN_ERR "[%d]: 0xab0016c=%x\n",__LINE__, val);
+			atbm_printk_err( "[%d]: 0xab0016c=%x\n",__LINE__, val);
 			break;
 		}
 		else if((val&0xe)==0x8){
-			atbm_powerave_sdio_sync(hw_priv);	
-			printk(KERN_ERR "wait LMAC clear error%d\n",__LINE__);
+			//atbm_powerave_sdio_sync(hw_priv);	
+			atbm_data_force_write(hw_priv,(void*)&forcePacket[0],sizeof(forcePacket)/sizeof(forcePacket[0]));
+			atbm_printk_err( "wait LMAC clear error%d,0xab0016c=%x\n",__LINE__,val);
 		}
+		mdelay(10);
+		atbm_printk_err( "wsm_sync_channl_reset 2\n");
 	}while(1);
 	//step 1--> Reuse softirq intr to reninitial lmac 
 	atbm_direct_write_unlock(hw_priv,addr,0);
 	do{
 		ret=atbm_direct_read_unlock(hw_priv,addr,buf);
 		if(cmd->cmd_id==0){
-			printk(KERN_ERR "Write Mem Success by DirectMode %x=%x\n",addr,cmd->cmd_id);
+			atbm_printk_err("Write Mem Success by DirectMode %x=%x\n",addr,cmd->cmd_id);
 			break;
 		}else{
-			printk(KERN_ERR "%s Write Mem Fail by DirectMode,what'happend!!! %d\n",__func__,__LINE__);
+			atbm_printk_err("%s Write Mem Fail by DirectMode,what'happend!!! %d\n",__func__,__LINE__);
 			//force transmit last channId
 	//		frame_hexdump("force",forcePacket,16);
 			//atbm_data_force_write(hw_priv,(void*)&forcePacket[0],sizeof(forcePacket)/sizeof(forcePacket[0]));
@@ -871,7 +936,7 @@ void wsm_sync_channl_reset(struct work_struct *work)
 			retry++;
 		}
 		if(retry>20){
-			printk(KERN_ERR "What'happend(RetryTimes) %d\n",retry);
+			atbm_printk_err("What'happend(RetryTimes) %d\n",retry);
 			BUG_ON(1);
 		}
 		mdelay(100);
@@ -883,7 +948,7 @@ void wsm_sync_channl_reset(struct work_struct *work)
 		//step 2-->Change directMode to read the Lmac reinital status
 		ret=atbm_direct_read_unlock(hw_priv,addr,buf);
 		if(ret){
-			printk(KERN_ERR "Direct Mode ReadErr, what'happend !!!\n");
+			atbm_printk_err("Direct Mode ReadErr, what'happend !!!\n");
 		}
 		//step3-->wait for Lmac initial ok
 		if(cmd->cmd_id==0xffffabcd){
@@ -904,13 +969,14 @@ void wsm_sync_channl_reset(struct work_struct *work)
 		mdelay(100);
 	}while(loop--);
 	hw_priv->syncChanl_done=1;
-	wsm_unlock_tx(hw_priv);
+	wsm_unlock_tx_async(hw_priv);
     hw_priv->sbus_ops->unlock(hw_priv->sbus_priv);
  	atbm_bh_resume(hw_priv);
     wake_up(&hw_priv->wsm_synchanl_done);
-	printk(KERN_ERR "wsm_sync_channl reset end \n");
+	atbm_printk_err("wsm_sync_channl reset end \n");
 }
 #endif
+
 #ifdef ATBM_SDIO_PATCH
 static int TRY_UP_LOCK(struct atbm_common *hw_priv)
 {
@@ -935,16 +1001,16 @@ void wsm_sync_channl(struct work_struct *work)
 {
 	int ret;
 	u16 reg;
-	int retry;
+	int retry = 0;
 	struct atbm_common *hw_priv =
 		container_of(work, struct atbm_common, wsm_sync_channl);
 	if(atbm_bh_is_term(hw_priv)){
 		wsm_unlock_tx(hw_priv);
-		printk("wsm_sync_channl start error \n");
+		atbm_printk_err("wsm_sync_channl start error \n");
 		return;
 	}
 	hw_priv->syncChanl_done = 0;
-	printk("wsm_sync_channl start \n");
+	atbm_printk_err("wsm_sync_channl start \n");
 	while(retry<=MAX_RETRY){
 		ret = atbm_reg_read_16(hw_priv, ATBM_HIFREG_CONTROL_REG_ID,&reg);
 		if(!ret){
@@ -956,7 +1022,7 @@ void wsm_sync_channl(struct work_struct *work)
 			break;
 		}else{
 			retry++;
-			printk("Read CONTROL reg  Error ,Retry =%d\n ",retry);
+			atbm_printk_err("Read CONTROL reg  Error ,Retry =%d\n ",retry);
 		}
 	}
 #if 0
@@ -969,14 +1035,14 @@ void wsm_sync_channl(struct work_struct *work)
 	//wait sync channle indication
     // wait_event_interruptible(hw_priv->wsm_syncChanl,hw_priv->syncChanl_done);
 
-	printk("wsm_sync_channl end \n");
+	atbm_printk_err("wsm_sync_channl end (%d)\n",retry);
 }
-int atbm_release_hmac_buffer(struct atbm_common *hw_priv,u32 packetID)
+int atbm_release_hmac_buffer(struct atbm_common *hw_priv,u32 packetID,u32 status)
 {
 	struct wsm_tx_confirm tx_confirm;
 
 	tx_confirm.packetID =packetID;
-	tx_confirm.status = WSM_DATA_CRC_ERRO;
+	tx_confirm.status =status;// WSM_DATA_CRC_ERRO;
 	tx_confirm.txedRate = 0;
 	tx_confirm.ackFailures = 0;
 	tx_confirm.flags = 0;
@@ -1010,7 +1076,7 @@ static int wsm_channel_indication(struct atbm_common *hw_priv,
 	u32 channle;
 
 	channle = WSM_GET32(buf);
-	printk("Lmac chanle =%d\n",channle);
+	atbm_printk_debug("Lmac chanle =%d\n",channle);
 	spin_lock_bh(&hw_priv->wsm_cmd.lock);
 	hw_priv->buf_id_tx=channle;
 	
@@ -1019,7 +1085,7 @@ static int wsm_channel_indication(struct atbm_common *hw_priv,
 
 	//cmd repeat
 	if(hw_priv->dataFlag==IS_CMD){
-	    printk("Here cmd Repeat\n");
+	   atbm_printk_err("Here cmd Repeat\n");
 	    spin_lock_bh(&hw_priv->wsm_cmd.lock);
 	    hw_priv->wsm_cmd.ret = WSM_CMD_CRC_ERRO;
 	    hw_priv->wsm_cmd.done = 1;
@@ -1036,7 +1102,7 @@ static int wsm_channel_indication(struct atbm_common *hw_priv,
 	wake_up(&hw_priv->wsm_synchanl_done);
 	return 0;
 underflow:
-	printk("wsm_channel_indication:EINVAL\n");
+	atbm_printk_err("wsm_channel_indication:EINVAL\n");
 	return -EINVAL;
 }
 static int wsm_tx_release_bufused(struct atbm_common *hw_priv,
@@ -1076,7 +1142,7 @@ static int wsm_tx_release_bufused(struct atbm_common *hw_priv,
 		if(Offset<64 
 				&& ((BitMap_l &((1)<<(Offset)))||BitMap_h & 1<<(Offset-32))){
 			if(bitmap->bitm.DataFlag==IS_DATA){//data
-				atbm_release_hmac_buffer(hw_priv,bitmap->bitm.packetId);
+				atbm_release_hmac_buffer(hw_priv,bitmap->bitm.packetId,WSM_DATA_CRC_ERRO);
 				//del the linkNode
 				list_del(&bitmap->link);
 				//free bitmap
@@ -1085,7 +1151,7 @@ static int wsm_tx_release_bufused(struct atbm_common *hw_priv,
 			}
 			loop++;
 		}else{
-			printk("HmacSsn->LmacEsn = %d:%d Fail\n",bitmap->bitm.HmacSsn,tx_released.LmacEsn);
+			atbm_printk_err("HmacSsn->LmacEsn = %d:%d Fail\n",bitmap->bitm.HmacSsn,tx_released.LmacEsn);
 			//lock tx bh
 			atbm_tx_queues_lock(hw_priv);
 			atomic_xchg(&hw_priv->bh_tx, 0);
@@ -1093,11 +1159,11 @@ static int wsm_tx_release_bufused(struct atbm_common *hw_priv,
 			hw_priv->dataFlag=IS_DATA;
 			list_for_each_entry_safe(bitmap,tmp,&hw_priv->SeqBitMapList,link){
 				if(bitmap->bitm.DataFlag==IS_DATA){//data release
-					printk("Here data Release %d\n",bitmap->bitm.HmacSsn);
-					atbm_release_hmac_buffer(hw_priv,bitmap->bitm.packetId);
+					atbm_printk_err("Here data Release %d\n",bitmap->bitm.HmacSsn);
+					atbm_release_hmac_buffer(hw_priv,bitmap->bitm.packetId,WSM_DATA_CRC_ERRO);
 				}
 				else{
-					printk(" ToDo cmd Repeat\n");
+					atbm_printk_err(" ToDo cmd Repeat\n");
 					hw_priv->dataFlag=bitmap->bitm.DataFlag;
 					//if acquire the mutes success ,return 0,if return other,it means where has been down lock 
 					//,here need up  
@@ -1132,8 +1198,14 @@ static int wsm_tx_release_cnt(struct atbm_common *hw_priv,
 {
 	int count;
     	count= WSM_GET32(buf);
+#ifdef ATBM_SDIO_PATCH
+	if(atomic_read(&hw_priv->flushed)== 1){
+		atomic_set(&hw_priv->flushed,0);
+		return 0;
+	}
+#endif
 	wsm_release_tx_buffer(hw_priv, count-1);
-	printk(KERN_DEBUG "count=%d\n",count);
+	atbm_printk_debug( "count=%d\n",count);
 	spin_lock_bh(&hw_priv->tx_com_lock);
     	hw_priv->wsm_txconfirm_num++;
     	spin_unlock_bh(&hw_priv->tx_com_lock);
@@ -1151,12 +1223,13 @@ static int wsm_tx_confirm(struct atbm_common *hw_priv,
 	struct atbm_seq_bit_map *bitmap=NULL,*tmp=NULL;
 	struct wsm_tx_confirm tx_confirm;
 	tx_confirm.packetID = WSM_GET32(buf);
+	tx_confirm.status = WSM_GET32(buf);
 	spin_lock_bh(&hw_priv->SeqBitMapLock);
         list_for_each_entry_safe(bitmap,tmp,&hw_priv->SeqBitMapList,link){
 		packetId=atbm_seq_to_packetId(hw_priv,bitmap->bitm.HmacSsn);
 		//find the packId
 		if(tx_confirm.packetID == packetId){
-			atbm_release_hmac_buffer(hw_priv,bitmap->bitm.packetId);
+			atbm_release_hmac_buffer(hw_priv,bitmap->bitm.packetId,tx_confirm.status);
 			//del the linkNode
 			list_del(&bitmap->link);
 			//free bitmap
@@ -1181,15 +1254,6 @@ static int wsm_tx_confirm(struct atbm_common *hw_priv,
 			  int interface_link_id)
 {
 	struct wsm_tx_confirm tx_confirm;
-#ifdef RESET_CHANGE
-	if (atomic_read(&hw_priv->reset_flag))
-	{
-		printk("wsm_tx_confirm:hw_priv->reset_flag\n");
-		//cmd can not transmit,return now
-		return 0;
-		
-	}
-#endif
 	tx_confirm.packetID = WSM_GET32(buf);
 	tx_confirm.status = WSM_GET32(buf);
 	tx_confirm.txedRate = WSM_GET8(buf);
@@ -1227,15 +1291,6 @@ static int wsm_multi_tx_confirm(struct atbm_common *hw_priv,
 	int count;
 	int i;
 	count = WSM_GET32(buf);
-#ifdef RESET_CHANGE
-	if (atomic_read(&hw_priv->reset_flag))
-	{
-		//cmd can not transmit,return now
-		printk("wsm_multi_tx_confirm:hw_priv->reset_flag\n");
-		return 0;
-		
-	}
-#endif
 	if (WARN_ON(count <= 0))
 		return -EINVAL;
 	else if (count > 1) {
@@ -1269,7 +1324,7 @@ static int wsm_join_confirm(struct atbm_common *hw_priv,
 			    struct wsm_buf *buf)
 {
 	if (WSM_GET32(buf) != WSM_STATUS_SUCCESS){
-		printk(KERN_ERR "<ATBM WIFI>: connect FAIL \n");
+		atbm_printk_err("<ATBM WIFI>: connect FAIL \n");
 		return -EINVAL;
 	}
 	arg->minPowerLevel = WSM_GET32(buf);
@@ -1495,7 +1550,7 @@ nomem:
 }
 
 /* ******************************************************************** */
-
+#if 0
 int wsm_switch_channel(struct atbm_common *hw_priv,
 		       const struct wsm_switch_channel *arg,
 		       int if_id)
@@ -1525,17 +1580,18 @@ nomem:
 	wsm_unlock_tx(hw_priv);
 	return -ENOMEM;
 }
+#endif
 #ifdef OPER_CLOCK_USE_SEM
 void atbm_pm_timer(unsigned long arg)
 {
 	struct atbm_common *hw_priv = (struct atbm_common *)arg;
-	printk(KERN_ERR "%s\n",__func__);
+	atbm_printk_err( "%s\n",__func__);
 	spin_lock_bh(&hw_priv->wsm_pm_spin_lock);
 	if(atomic_read(&hw_priv->wsm_pm_running) == 1){
 		atomic_set(&hw_priv->wsm_pm_running, 0);
 		wsm_oper_unlock(hw_priv);
 		atbm_release_suspend(hw_priv);
-		printk(KERN_ERR "%s:pm timeout\n",__func__);
+		atbm_printk_err("%s:pm timeout\n",__func__);
 	}
 	spin_unlock_bh(&hw_priv->wsm_pm_spin_lock);
 }
@@ -1574,7 +1630,7 @@ void wsm_wait_pm_sync(struct atbm_common *hw_priv)
 	*wait pm indication
 	*/
 	wsm_oper_unlock(hw_priv);
-	printk(KERN_ERR"%s:complete\n",__func__);
+	atbm_printk_err("%s:complete\n",__func__);
 }
 int wsm_set_pm(struct atbm_common *hw_priv, const struct wsm_set_pm *arg,
 		int if_id)
@@ -1614,7 +1670,8 @@ int wsm_start(struct atbm_common *hw_priv, const struct wsm_start *arg,
 {
 	int ret;
 	struct wsm_buf *buf = &hw_priv->wsm_cmd_buf;
-
+	
+	wsm_oper_lock(hw_priv);
 	wsm_cmd_lock(hw_priv);
 
 	WSM_PUT8(buf, arg->mode);
@@ -1636,10 +1693,12 @@ int wsm_start(struct atbm_common *hw_priv, const struct wsm_start *arg,
 			if_id);
 
 	wsm_cmd_unlock(hw_priv);
+	wsm_oper_unlock(hw_priv);
 	return ret;
 
 nomem:
 	wsm_cmd_unlock(hw_priv);
+	wsm_oper_unlock(hw_priv);
 	return -ENOMEM;
 }
 
@@ -1729,8 +1788,8 @@ nomem:
 static int wsm_give_buffer_confirm(struct atbm_common *hw_priv,
                             struct wsm_buf *buf)
 {
-	wsm_printk(KERN_DEBUG "[WSM] HW Buf count %d\n", hw_priv->hw_bufs_used);
-	wsm_printk(KERN_DEBUG "[WSM] HW Buf short count %d\n", hw_priv->hw_bufs_used_short);
+	wsm_printk( "[WSM] HW Buf count %d\n", hw_priv->hw_bufs_used);
+	wsm_printk( "[WSM] HW Buf short count %d\n", hw_priv->hw_bufs_used_short);
 	if (!(hw_priv->hw_bufs_used))
 		wake_up(&hw_priv->bh_evt_wq);
 	return 0;
@@ -1782,7 +1841,7 @@ static int wsm_request_buffer_confirm(struct atbm_vif *priv,
 
 	spin_lock_bh(&priv->ps_state_lock);
 	change_mask = (priv->sta_asleep_mask ^ sta_asleep_mask);
-	wsm_printk(KERN_DEBUG "CM %x, HM %x, FWM %x\n", change_mask,priv->sta_asleep_mask, sta_asleep_mask);
+	wsm_printk( "CM %x, HM %x, FWM %x\n", change_mask,priv->sta_asleep_mask, sta_asleep_mask);
 	spin_unlock_bh(&priv->ps_state_lock);
 
 	if (change_mask) {
@@ -1800,17 +1859,17 @@ static int wsm_request_buffer_confirm(struct atbm_vif *priv,
 			/* If FW state and host state for this link are different then notify OMAC */
 			if(change_mask & mask) {
 
-				wsm_printk(KERN_DEBUG "PS State Changed %d for sta %pM\n", (sta_asleep_mask & mask) ? 1:0, priv->link_id_db[i].mac);
+				wsm_printk( "PS State Changed %d for sta %pM\n", (sta_asleep_mask & mask) ? 1:0, priv->link_id_db[i].mac);
 
 
 				rcu_read_lock();
 				sta = ieee80211_find_sta(priv->vif, priv->link_id_db[i].mac);
 				if (!sta) {
-					wsm_printk(KERN_DEBUG "[WSM] WRBC - could not find sta %pM\n",
+					wsm_printk( "[WSM] WRBC - could not find sta %pM\n",
 							priv->link_id_db[i].mac);
 				} else {
 					ret = ieee80211_sta_ps_transition_ni(sta, (sta_asleep_mask & mask) ? true: false);
-					wsm_printk(KERN_DEBUG "PS State NOTIFIED %d\n", ret);
+					wsm_printk( "PS State NOTIFIED %d\n", ret);
 					WARN_ON(ret);
 				}
 				rcu_read_unlock();
@@ -1822,7 +1881,7 @@ static int wsm_request_buffer_confirm(struct atbm_vif *priv,
 		spin_unlock_bh(&priv->ps_state_lock);
 	}
 
-	wsm_printk(KERN_DEBUG "[WSM] WRBC - HW Buf count %d SleepMask %d\n",
+	wsm_printk( "[WSM] WRBC - HW Buf count %d SleepMask %d\n",
 					hw_priv->hw_bufs_used, sta_asleep_mask);
 	hw_priv->buf_released = 0;
 	WARN_ON(count != (hw_priv->wsm_caps.numInpChBufs - 1));
@@ -1858,7 +1917,7 @@ nomem:
 }
 
 #endif
-
+#ifdef ATBM_SUPPORT_WOW
 int wsm_set_keepalive_filter(struct atbm_vif *priv, bool enable)
 {
         struct atbm_common *hw_priv = ABwifi_vifpriv_to_hwpriv(priv);
@@ -1866,7 +1925,7 @@ int wsm_set_keepalive_filter(struct atbm_vif *priv, bool enable)
         priv->rx_filter.keepalive = enable;
         return wsm_set_rx_filter(hw_priv, &priv->rx_filter, priv->if_id);
 }
-
+#endif
 int wsm_set_probe_responder(struct atbm_vif *priv, bool enable)
 {
         struct atbm_common *hw_priv = ABwifi_vifpriv_to_hwpriv(priv);
@@ -1898,7 +1957,7 @@ static int wsm_startup_indication(struct atbm_common *hw_priv,
 	hw_priv->wsm_caps.hardwareSubId	= WSM_GET16(buf);
 	status				= WSM_GET16(buf);
 	hw_priv->wsm_caps.firmwareCap	= WSM_GET16(buf);
-	printk("firmwareCap %x\n",hw_priv->wsm_caps.firmwareCap);
+	atbm_printk_init("firmwareCap %x\n",hw_priv->wsm_caps.firmwareCap);
 	hw_priv->wsm_caps.firmwareType	= WSM_GET16(buf);
 	hw_priv->wsm_caps.firmwareApiVer	= WSM_GET16(buf);
 	hw_priv->wsm_caps.firmwareBuildNumber = WSM_GET16(buf);
@@ -1910,31 +1969,18 @@ static int wsm_startup_indication(struct atbm_common *hw_priv,
 	Config[2]	= WSM_GET32(buf);
 	Config[3]	= WSM_GET32(buf);
 	firmwareCap2 =WSM_GET16(buf);
-	printk("firmwareCap2 %x\n",firmwareCap2);
+	hw_priv->wsm_caps.NumOfStations = Config[0] & 0x0000FFFF;
+	hw_priv->wsm_caps.NumOfInterfaces = (Config[0] & 0xFFFF0000) >> 16;
+	atbm_printk_init("firmwareCap2 %x\n",firmwareCap2);
 	hw_priv->wsm_caps.firmwareCap	|= (firmwareCap2<<16);
-	
-#define CAPABILITIES_NEW_RATE_POLICY 	BIT(1)
-#define CAPABILITIES_IPC 				BIT(2)
-#define CAPABILITIES_NO_CONFIRM 		BIT(3)
-#define CAPABILITIES_SDIO_PATCH 		BIT(4)
-#define CAPABILITIES_SIGMA_STAR 		BIT(5)
-#define CAPABILITIES_CFO 				BIT(6)
-#define CAPABILITIES_AGC 				BIT(7)
-#define CAPABILITIES_TXCAL 				BIT(8)
-#define CAPABILITIES_MONITOR 			BIT(9)
-#define CAPABILITIES_CUSTOM 			BIT(10)
-#define CAPABILITIES_SMARTCONFIG		BIT(11)
-#define CAPABILITIES_ETF				BIT(12)
-#define CAPABILITIES_LMAC_RATECTL		BIT(13)
-#define CAPABILITIES_LMAC_TPC			BIT(14)
-#define CAPABILITIES_LMAC_TEMPC			BIT(15)
-#define CAPABILITIES_CTS_BUG			BIT(16)
-#define CAPABILITIES_USB_RECOVERY_BUG	BIT(17)
-#define CAPABILITIES_VIFADDR_LOCAL_BIT	BIT(18)
-
-
-	printk("wsm_caps.firmwareCap %x firmware used %s-rate policy\n",hw_priv->wsm_caps.firmwareCap,hw_priv->wsm_caps.firmwareCap&CAPABILITIES_NEW_RATE_POLICY?"new":"old");
-#if (OLD_RATE_POLICY==0)
+	hw_priv->wsm_caps.NumOfHwXmitedAddr = Config[3];
+	hw_priv->hw_bufs_free = hw_priv->wsm_caps.numInpChBufs;
+	hw_priv->hw_bufs_free_init = hw_priv->hw_bufs_free;
+//	BUG_ON(hw_priv->wsm_caps.NumOfHwXmitedAddr == 0);
+//	printk("wsm_caps.firmwareCap %x firmware used %s-rate policy\n",hw_priv->wsm_caps.firmwareCap,hw_priv->wsm_caps.firmwareCap&CAPABILITIES_NEW_RATE_POLICY?"new":"old");
+	atbm_printk_init("wsm_caps.firmwareCap %x",hw_priv->wsm_caps.firmwareCap);
+/*
+	#if (OLD_RATE_POLICY==0)
 	//CAPABILITIES_NEW_RATE_POLICY
 	if((hw_priv->wsm_caps.firmwareCap & CAPABILITIES_NEW_RATE_POLICY)==0){
 		printk(KERN_ERR "\n\n\n******************************************************\n");
@@ -1952,18 +1998,18 @@ static int wsm_startup_indication(struct atbm_common *hw_priv,
 		BUG_ON(1);
 	}
 #endif //(OLD_RATE_POLICY==0)
-
+*/
 	if (WARN_ON(status))
 		return -EINVAL;
 
 	if (WARN_ON(hw_priv->wsm_caps.firmwareType > 4))
 		return -EINVAL;
 
-	printk(KERN_ERR "apollo wifi WSM init done.\n"
+	atbm_printk_init("apollo wifi WSM init done.\n"
 		"   Input buffers: %d x %d bytes\n"
 		"   Hardware: %d.%d\n"
 		"   %s firmware [%s], ver: %d, build: %d,"
-		    " api: %d, cap: 0x%.4X Config[%x]  expection %x, ep0 cmd addr %x\n",
+		    " api: %d, cap: 0x%.4X Config[%x]  expection %x, ep0 cmd addr %x NumOfStations[%x] NumOfInterfaces[%x]\n",
 		hw_priv->wsm_caps.numInpChBufs,
 		hw_priv->wsm_caps.sizeInpChBuf,
 		hw_priv->wsm_caps.hardwareId,
@@ -1973,58 +2019,94 @@ static int wsm_startup_indication(struct atbm_common *hw_priv,
 		hw_priv->wsm_caps.firmwareVersion,
 		hw_priv->wsm_caps.firmwareBuildNumber,
 		hw_priv->wsm_caps.firmwareApiVer,
-		hw_priv->wsm_caps.firmwareCap,Config[0],Config[1],Config[2]);
-
+		hw_priv->wsm_caps.firmwareCap,Config[0],Config[1],Config[2],hw_priv->wsm_caps.NumOfStations,hw_priv->wsm_caps.NumOfInterfaces);
+	BUG_ON(hw_priv->wsm_caps.NumOfStations == 0);
+	BUG_ON(hw_priv->wsm_caps.NumOfStations > ATBMWIFI_MAX_STA_IN_AP_MODE);
 	hw_priv->wsm_caps.firmwareReady = 1;
 	hw_priv->wsm_caps.exceptionaddr =Config[1];
 	hw_priv->wsm_caps.HiHwCnfBufaddr = Config[2];//ep0 addr
+//#if (PROJ_TYPE>=ARES_B)
+	if(hw_priv->chip_version >= ARES_B){
+		atbm_printk_init("EFUSE(8)				[%d]\n",!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_EFUSE8));
+		atbm_printk_init("EFUSE(I)					[%d]\n",!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_EFUSEI));
+		atbm_printk_init("EFUSE(B)			[%d]\n",!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_EFUSEB));
+	}
+//#endif //(PROJ_TYPE>=ARES_B)
+	atbm_printk_init("CAPABILITIES_ATBM_PRIVATE_IE      [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_ATBM_PRIVATE_IE)		); 
+	atbm_printk_init("CAPABILITIES_NVR_IPC              [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_NVR_IPC)  );  
+	atbm_printk_init("CAPABILITIES_NO_CONFIRM           [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_NO_CONFIRM 		)  );
+	atbm_printk_init("CAPABILITIES_SDIO_PATCH           [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_SDIO_PATCH 		)  );
+	atbm_printk_init("CAPABILITIES_NO_BACKOFF           [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_NO_BACKOFF 		)  );
+	atbm_printk_init("CAPABILITIES_CFO                  [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_CFO 		)  );  
+	atbm_printk_init("CAPABILITIES_AGC                  [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_AGC 		)  );  
+	atbm_printk_init("CAPABILITIES_TXCAL                [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_TXCAL 		)  );  
+	atbm_printk_init("CAPABILITIES_MONITOR              [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_MONITOR 		)  );  
+	atbm_printk_init("CAPABILITIES_CUSTOM               [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_CUSTOM 		)  );
+	atbm_printk_init("CAPABILITIES_SMARTCONFIG          [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_SMARTCONFIG		)  );
+	atbm_printk_init("CAPABILITIES_ETF                  [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_ETF		)  );
+	atbm_printk_init("CAPABILITIES_LMAC_RATECTL         [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_LMAC_RATECTL		)  );  
+	atbm_printk_init("CAPABILITIES_LMAC_TPC             [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_LMAC_TPC		)  );  
+	atbm_printk_init("CAPABILITIES_LMAC_TEMPC           [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_LMAC_TEMPC		)  );  
+	atbm_printk_init("CAPABILITIES_CTS_BUG              [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_CTS_BUG		)  );
+	atbm_printk_init("CAPABILITIES_USB_RECOVERY_BUG     [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_USB_RECOVERY_BUG)	); 
+	atbm_printk_init("CAPABILITIES_USE_IPC              [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_USE_IPC)      );
+	atbm_printk_init("CAPABILITIES_OUTER_PA             [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_OUTER_PA)      );
+	atbm_printk_init("CAPABILITIES_POWER_CONSUMPTION    [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_POWER_CONSUMPTION)      );
+	atbm_printk_init("CAPABILITIES_RSSI_DECIDE_TXPOWER  [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_RSSI_DECIDE_TXPOWER)      );
+	atbm_printk_init("CAPABILITIES_RTS_LONG_DURATION    [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_RTS_LONG_DURATION)      );
+	atbm_printk_init("CAPABILITIES_TX_CFO_PPM_CORRECTION[%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_TX_CFO_PPM_CORRECTION)      );
+//#if (PROJ_TYPE>=ARES_B)
+	if(hw_priv->chip_version >=ARES_B){
+		atbm_printk_init("CAPABILITIES_SHARE_CRYSTAL       [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_NOISE_SET_DCXO)      );
+		atbm_printk_init("CAPABILITIES_CFO_DCXO_CORRECTION	[%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_CFO_DCXO_CORRECTION)		);
+	}
+	else {
+//#else //(PROJ_TYPE>=ARES_B)
+		atbm_printk_init("CAPABILITIES_NOISE_SET_DCXO       [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_NOISE_SET_DCXO)      );
+	}
+//#endif //(PROJ_TYPE>=ARES_B)
+	atbm_printk_init("CAPABILITIES_HW_CHECKSUM          [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_HW_CHECKSUM)      );
+	atbm_printk_init("CAPABILITIES_SINGLE_CHANNEL_MULRX [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_SINGLE_CHANNEL_MULTI_RX)      );
 
-	printk(KERN_ERR"CAPABILITIES_NEW_RATE_POLICY   [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_NEW_RATE_POLICY)		); 
-	printk(KERN_ERR"CAPABILITIES_IPC 		[%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_IPC)  );  
-	printk(KERN_ERR"CAPABILITIES_NO_CONFIRM 		   [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_NO_CONFIRM 		)  );
-	printk(KERN_ERR"CAPABILITIES_SDIO_PATCH 		   [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_SDIO_PATCH 		)  );
-	printk(KERN_ERR"CAPABILITIES_SIGMA_STAR 		   [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_SIGMA_STAR 		)  );
-	printk(KERN_ERR"CAPABILITIES_CFO 		[%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_CFO 		)  );  
-	printk(KERN_ERR"CAPABILITIES_AGC 		[%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_AGC 		)  );  
-	printk(KERN_ERR"CAPABILITIES_TXCAL 		[%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_TXCAL 		)  );  
-	printk(KERN_ERR"CAPABILITIES_MONITOR 		[%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_MONITOR 		)  );  
-	printk(KERN_ERR"CAPABILITIES_CUSTOM 		[%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_CUSTOM 		)  );
-	printk(KERN_ERR"CAPABILITIES_SMARTCONFIG	[%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_SMARTCONFIG		)  );
-	printk(KERN_ERR"CAPABILITIES_ETF			[%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_ETF		)  );
-	printk(KERN_ERR"CAPABILITIES_LMAC_RATECTL	[%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_LMAC_RATECTL		)  );  
-	printk(KERN_ERR"CAPABILITIES_LMAC_TPC		[%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_LMAC_TPC		)  );  
-	printk(KERN_ERR"CAPABILITIES_LMAC_TEMPC		[%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_LMAC_TEMPC		)  );  
-	printk(KERN_ERR"CAPABILITIES_CTS_BUG		[%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_CTS_BUG		)  );
-	printk(KERN_ERR"CAPABILITIES_USB_RECOVERY_BUG	 [%d]\n" ,!!(hw_priv->wsm_caps.firmwareCap &CAPABILITIES_USB_RECOVERY_BUG)	); 
-
-	
 #ifdef CONFIG_TX_NO_CONFIRM
 	if((hw_priv->wsm_caps.firmwareCap &CAPABILITIES_NO_CONFIRM)==0){
-		
-		printk(KERN_ERR "LMAC NOT CAPABILITIES_NO_CONFIRM <ERROR>\n");
+		atbm_printk_init("LMAC NOT CAPABILITIES_NO_CONFIRM <ERROR>\n");
 		BUG_ON(1);
 	}
 #else
 	if((hw_priv->wsm_caps.firmwareCap &CAPABILITIES_NO_CONFIRM)){
 		
-		printk(KERN_ERR "LMAC SET CAPABILITIES_NO_CONFIRM <ERROR>\n");
+		atbm_printk_init("LMAC SET CAPABILITIES_NO_CONFIRM <ERROR>\n");
 		BUG_ON(1);
 	}
 #endif
 
-#ifdef	ATBM_P2P_ADDR_USE_LOCAL_BIT
+#ifdef ATBM_P2P_ADDR_USE_LOCAL_BIT
 	if((hw_priv->wsm_caps.firmwareCap &CAPABILITIES_VIFADDR_LOCAL_BIT)==0){
 		
-		printk(KERN_ERR "LMAC NOT CAPABILITIES_VIFADDR_LOCAL_BIT <ERROR>\n");
+		atbm_printk_init("LMAC NOT CAPABILITIES_VIFADDR_LOCAL_BIT <ERROR>\n");
 //		BUG_ON(1);
 	}
 #else
 	if((hw_priv->wsm_caps.firmwareCap &CAPABILITIES_VIFADDR_LOCAL_BIT)){
 		
-		printk(KERN_ERR "LMAC SET CAPABILITIES_VIFADDR_LOCAL_BIT <ERROR>\n");
+		atbm_printk_init("LMAC SET CAPABILITIES_VIFADDR_LOCAL_BIT <ERROR>\n");
 //		BUG_ON(1);
 	}
 #endif
+
+#ifdef ATBM_PRODUCT_TEST_USE_FEATURE_ID
+	atbm_printk_init("CONFIG_PRODUCT_TEST_USE_FEATURE_ID [1]\n");
+#else
+	atbm_printk_init("CONFIG_PRODUCT_TEST_USE_FEATURE_ID [0]\n");
+#endif
+#ifdef CONFIG_ATBM_PRODUCT_TEST_USE_GOLDEN_LED
+	atbm_printk_init("CONFIG_PRODUCT_TEST_USE_GOLDEN_LED [1]\n");
+#else
+	atbm_printk_init("CONFIG_PRODUCT_TEST_USE_GOLDEN_LED [0]\n");
+#endif
+
+
 	wake_up(&hw_priv->wsm_startup_done);
 	return 0;
 
@@ -2045,10 +2127,10 @@ static int wsm_debug_print_indication(struct atbm_common *hw_priv,
 	WSM_GET(buf, &fw_debug_print[0], length);
 	fw_debug_print[length] = '\0';
 
-	printk(KERN_ERR "[lmac]:%s", fw_debug_print);
+	atbm_printk_lmac("[lmac]:%s", fw_debug_print);
 	return 0;
 underflow:
-	printk("wsm_debug_print_indication:EINVAL\n");
+	atbm_printk_err("wsm_debug_print_indication:EINVAL\n");
 	return -EINVAL;
 }
 
@@ -2057,41 +2139,44 @@ static int wsm_smartconfig_indication(struct atbm_common *hw_priv,
 					struct wsm_buf *buf,
 					struct sk_buff **skb_p)
 {
-#if (PROJ_TYPE>=ARES_A)
+//#if (PROJ_TYPE>=ARES_A)
+#if (PROJ_TYPE_SUPPORT&ATBM_CHIP_SUPPORT_PLUS_EQ(ARES_A))
 #ifdef ATBM_SUPPORT_SMARTCONFIG
+	if(hw_priv->chip_version >=ARES_A){
 
-	//struct atbm_vif *priv;
-	int channelNum;
-	int channelType;
-	int packNum;
-	int rate;
-	int length;
-	u32	rx_status0_start;
-	size_t hdr_len;
-	int length_bak;
-	char * data;
+		//struct atbm_vif *priv;
+		int channelNum;
+		int channelType;
+		int packNum;
+		int rate;
+		int length;
+		u32	rx_status0_start;
+		size_t hdr_len;
+		int length_bak;
+		char * data;
 
-	channelType 		= WSM_GET16(buf);
-	channelNum  		= WSM_GET16(buf);
-	packNum 			= WSM_GET8(buf);
-	rate				= WSM_GET8(buf);
-	length				= WSM_GET16(buf);
-	rx_status0_start	= WSM_GET32(buf);
+		channelType 		= WSM_GET16(buf);
+		channelNum  		= WSM_GET16(buf);
+		packNum 			= WSM_GET8(buf);
+		rate				= WSM_GET8(buf);
+		length				= WSM_GET16(buf);
+		rx_status0_start	= WSM_GET32(buf);
 
-	hdr_len = buf->data - buf->begin;
-	atbm_skb_pull(*skb_p, hdr_len);
-	length_bak = (*skb_p)->len;
-	(*skb_p)->len = length;
-	data  = (*skb_p)->data;
-	printk("chann=%d,packNum=%d,len=%d,mac=%02x:%02x:%02x:%02x:%02x:%02x\n",channelNum,packNum,length,
-		data[4],data[5],data[6],data[7],data[8],data[9]);
-	smartconfig_start_rx(hw_priv,*skb_p,channelNum);
-	if (*skb_p)
-	{	
-		(*skb_p)->len = length_bak;
-		atbm_skb_push(*skb_p, hdr_len);
-	}
+		hdr_len = buf->data - buf->begin;
+		atbm_skb_pull(*skb_p, hdr_len);
+		length_bak = (*skb_p)->len;
+		(*skb_p)->len = length;
+		data  = (*skb_p)->data;
+		atbm_printk_smt("chann=%d,packNum=%d,len=%d,mac=%02x:%02x:%02x:%02x:%02x:%02x\n",channelNum,packNum,length,
+			data[4],data[5],data[6],data[7],data[8],data[9]);
+		smartconfig_start_rx(hw_priv,*skb_p,channelNum);
+			if (*skb_p)
+			{	
+				(*skb_p)->len = length_bak;
+				atbm_skb_push(*skb_p, hdr_len);
+			}
 underflow:
+	}
 #endif 	//#ifdef ATBM_SUPPORT_SMARTCONFIG
 #endif //#if (PROJ_TYPE==ARES_A)
 	return 0;
@@ -2102,9 +2187,11 @@ static int wsm_receive_indication(struct atbm_common *hw_priv,
 					struct sk_buff **skb_p)
 {
 	struct atbm_vif *priv;
+#ifndef CONFIG_RATE_HW_CONTROL
 #ifdef  MINSTREL_RSSI_USED
 	struct sta_info *sta;
 	unsigned char *mac;
+#endif
 #endif
 	hw_priv->rx_timestamp = jiffies;
 	if (hw_priv->wsm_cbc.rx) {
@@ -2134,7 +2221,7 @@ static int wsm_receive_indication(struct atbm_common *hw_priv,
 		}
 #endif
 		
-#ifdef CONFIG_WIRELESS_EXT
+//#ifdef CONFIG_WIRELESS_EXT
 		if (hw_priv->bStartTx && hw_priv->etf_test_v2){
 			fctl = *(__le16 *)buf->data;
 			//printk("rx etf data %x\n",fctl);
@@ -2144,10 +2231,10 @@ static int wsm_receive_indication(struct atbm_common *hw_priv,
 				etf_v2_scan_rx(hw_priv,*skb_p,rx.rcpiRssi);
 				if (*skb_p)
 					atbm_skb_push(*skb_p, hdr_len);
-				return 0;
 			}
+			return 0;
 		}
-#endif //#ifdef CONFIG_WIRELESS_EXT
+//#endif //#ifdef CONFIG_WIRELESS_EXT
 	/* TODO:COMBO: Frames received from scanning are received
 		* with interface ID == 2 */
 			if (interface_link_id == ATBM_WIFI_GENERIC_IF_ID) {
@@ -2155,12 +2242,16 @@ static int wsm_receive_indication(struct atbm_common *hw_priv,
 				 * Request */
 				interface_link_id = get_interface_id_scanning(hw_priv);
 				if (interface_link_id == -1) {
+#ifdef CONFIG_ATBM_SUPPORT_P2P
 					interface_link_id = hw_priv->roc_if_id;
+#endif
 //				printk("%s %d if_id=%d\n",__func__,__LINE__,interface_link_id);
-					#ifdef ATBM_SUPPORT_PKG_MONITOR
 					if(interface_link_id == -1)
 						interface_link_id = hw_priv->monitor_if_id;
-					#endif
+#ifdef CONFIG_ATBM_STA_LISTEN
+					if(interface_link_id == -1)
+						interface_link_id = hw_priv->sta_listen_if;
+#endif
 					#if 0
 					if((interface_link_id != -1)&&(hw_priv->roc_if_id != -1)){
 						if(!time_is_after_jiffies(hw_priv->roc_start_time+((hw_priv->roc_duration+25)*HZ)/1000)){
@@ -2170,12 +2261,14 @@ static int wsm_receive_indication(struct atbm_common *hw_priv,
 					}
 					#endif
 				}
+#ifdef CONFIG_ATBM_SUPPORT_SCHED_SCAN
 #ifdef ROAM_OFFLOAD
 				if (hw_priv->auto_scanning) {
 					interface_link_id = hw_priv->scan.if_id;
-					printk("%s %d if_id=%d\n",__func__,__LINE__,interface_link_id);
+					atbm_printk_scan("%s %d if_id=%d\n",__func__,__LINE__,interface_link_id);
 				}
 #endif/*ROAM_OFFLOAD*/
+#endif
 			}
 			/* linkid (peer sta id is encoded in bit 25-28 of
 			   flags field */
@@ -2200,14 +2293,28 @@ static int wsm_receive_indication(struct atbm_common *hw_priv,
 
 		/* FW Workaround: Drop probe resp or
 		beacon when RSSI is 0 */
-
+//#if (PROJ_TYPE>=ARES_B)
+	if(hw_priv->chip_version>=ARES_B){
+		if (((s8)(rx.rcpiRssi)>5) &&
+		    (ieee80211_is_probe_resp(hdr->frame_control) ||
+		    ieee80211_is_beacon(hdr->frame_control))) {
+			atbm_priv_vif_list_read_unlock(&priv->vif_lock);
+			atbm_printk_err("rcpiRssi %d\n",(s8)(rx.rcpiRssi));
+			return 0;
+		}
+	}
+	else {
+//#else
 		if (!rx.rcpiRssi &&
 		    (ieee80211_is_probe_resp(hdr->frame_control) ||
 		    ieee80211_is_beacon(hdr->frame_control))) {
 			atbm_priv_vif_list_read_unlock(&priv->vif_lock);
-			printk(KERN_ERR "wsm_receive_indication: rcpiRssi is zero\n");
+			atbm_printk_err("rcpiRssi is zero\n");
 			return 0;
 		}
+	}
+//#endif
+#ifndef CONFIG_RATE_HW_CONTROL
 #ifdef  MINSTREL_RSSI_USED
 		/*  int mean_rssi; //add rx rssi 
 		int max_rssi;
@@ -2235,14 +2342,18 @@ static int wsm_receive_indication(struct atbm_common *hw_priv,
 			//	if (rx.rcpiRssi >=128)
 			//	{
 
-#if (PROJ_TYPE>=ARES_A)
-				if(rx.rcpiRssi > 128)
-					rssi = rx.rcpiRssi -256;
-				else
-					rssi = (s8)rx.rcpiRssi;
-#else //ATHEBNAB
-					rssi = rx.rcpiRssi/2 - 110;
-#endif //(PROJ_TYPE>=ARES_A)
+//#if (PROJ_TYPE>=ARES_A)
+						if(hw_priv->chip_version >=ARES_A){
+										if(rx.rcpiRssi > 128)
+											rssi = rx.rcpiRssi -256;
+										else
+											rssi = (s8)rx.rcpiRssi;
+						}
+						else {
+					//#else //ATHEBNAB
+										rssi = rx.rcpiRssi/2 - 110;
+					//#endif //(PROJ_TYPE>=ARES_A)
+						}
 			//	}
                        rc_sta_info->total_rssi =  rc_sta_info->total_rssi +  rssi;
 
@@ -2257,23 +2368,26 @@ static int wsm_receive_indication(struct atbm_common *hw_priv,
 				}
 			}else
 				{
-				printk(KERN_ERR "wsm_receive_indication: msp is NULL\n");
+				atbm_printk_rx( "wsm_receive_indication: msp is NULL\n");
 				}
 		}
 		rcu_read_unlock();
 #endif
+#endif
 
-#if (PROJ_TYPE>=ARES_A)
-		if(rx.rcpiRssi > 128)
-			rx.rcpiRssi = rx.rcpiRssi -256;
-		else
-			rx.rcpiRssi = rx.rcpiRssi;
-#else //ATHEBNAB
-		/* If no RSSI subscription has been made,
-		* convert RCPI to RSSI here */
-		if (!priv->cqm_use_rssi)
-			rx.rcpiRssi = rx.rcpiRssi / 2 - 110;
-#endif //(PROJ_TYPE>=ARES_A)
+//#if (PROJ_TYPE>=ARES_A)
+		if(hw_priv->chip_version >=ARES_A){
+			if(rx.rcpiRssi > 128)
+				rx.rcpiRssi = rx.rcpiRssi -256;
+		}
+		else  {
+//#else //ATHEBNAB
+			/* If no RSSI subscription has been made,
+			* convert RCPI to RSSI here */
+			if (!priv->cqm_use_rssi)
+				rx.rcpiRssi = rx.rcpiRssi / 2 - 110;
+		}
+//#endif //(PROJ_TYPE>=ARES_A)
 		fctl = *(__le16 *)buf->data;
 		hdr_len = buf->data - buf->begin;
 		atbm_skb_pull(*skb_p, hdr_len);
@@ -2281,12 +2395,12 @@ static int wsm_receive_indication(struct atbm_common *hw_priv,
 			if (priv->join_status == ATBM_APOLLO_JOIN_STATUS_STA) {
 				/* Shedule unjoin work */
 				bool do_unjoin = false;
-				printk(KERN_ERR "%s:receive deauthen bssid[%pM],join_bssid[%pM]\n",__func__,hdr->addr3,priv->join_bssid);
+				atbm_printk_always("rx deauthen bssid[%pM],join_bssid[%pM]\n",hdr->addr3,priv->join_bssid);
     			if(memcmp(priv->join_bssid, hdr->addr3, ETH_ALEN) == 0){
 					do_unjoin = true;
 				}
 				if(do_unjoin == true){
-					wsm_printk(KERN_DEBUG \
+					wsm_printk( \
 						"[WSM] Issue unjoin command (RX).\n");
 						wsm_lock_tx_async(hw_priv);
 						if (atbm_hw_priv_queue_work(hw_priv,
@@ -2294,11 +2408,13 @@ static int wsm_receive_indication(struct atbm_common *hw_priv,
 							wsm_unlock_tx(hw_priv);
 				}else{
 					atbm_priv_vif_list_read_unlock(&priv->vif_lock);
-					printk(KERN_ERR "%s:receive unknown deauthen bssid[%pM]\n",__func__,hdr->addr3);
+					atbm_printk_err( "unknown bssid[%pM]\n",hdr->addr3);
 					return 0;
 				}
 			}
 		}
+		if(hw_priv->sbus_ops->sbus_rev_giveback)
+			hw_priv->sbus_ops->sbus_rev_giveback(hw_priv->sbus_priv,&rx);
 		hw_priv->wsm_cbc.rx(priv, &rx, skb_p);
 		if (*skb_p)
 			atbm_skb_push(*skb_p, hdr_len);
@@ -2322,7 +2438,7 @@ static int wsm_event_indication(struct atbm_common *hw_priv,
 	priv = ABwifi_hwpriv_to_vifpriv(hw_priv, interface_link_id);
 
 	if (unlikely(!priv)) {
-		wsm_printk(KERN_DEBUG "[WSM] Event: %d(%d) for removed "
+		wsm_printk( "[WSM] Event: %d(%d) for removed "
 			   "interface, ignoring\n", event->evt.eventId,
 			   event->evt.eventData);
 		return 0;
@@ -2335,13 +2451,22 @@ static int wsm_event_indication(struct atbm_common *hw_priv,
 	}
 	atbm_priv_vif_list_read_unlock(&priv->vif_lock);
 
+	#ifndef USB_USE_TASTLET_TXRX
 	event = atbm_kzalloc(sizeof(struct atbm_wsm_event), GFP_KERNEL);
+	#else
+	event = atbm_kzalloc(sizeof(struct atbm_wsm_event), GFP_ATOMIC);
+	#endif
+	
+	if(event == NULL){
+		WARN_ON(1);
+		return 0;
+	}
 
 	event->evt.eventId = __le32_to_cpu(WSM_GET32(buf));
 	event->evt.eventData = __le32_to_cpu(WSM_GET32(buf));
 	event->if_id = interface_link_id;
 
-	wsm_printk(KERN_DEBUG "[WSM] Event: %d(%d)\n",
+	wsm_printk( "[WSM] Event: %d(%d)\n",
 		event->evt.eventId, event->evt.eventData);
 
 	spin_lock_bh(&hw_priv->event_queue_lock);
@@ -2380,7 +2505,7 @@ underflow:
 static int wsm_set_pm_indication(struct atbm_common *hw_priv,
 					struct wsm_buf *buf)
 {
-	printk(KERN_ERR "%s:rev ind\n",__func__);
+	atbm_printk_pm("[PM]:rev ind\n");
 	#ifdef OPER_CLOCK_USE_SEM
 	spin_lock_bh(&hw_priv->wsm_pm_spin_lock);
 	if(atomic_read(&hw_priv->wsm_pm_running) == 1){
@@ -2388,7 +2513,7 @@ static int wsm_set_pm_indication(struct atbm_common *hw_priv,
 		del_timer(&hw_priv->wsm_pm_timer);
 		wsm_oper_unlock(hw_priv);
 		atbm_release_suspend(hw_priv);
-		printk(KERN_ERR "%s:up pm lock\n",__func__);
+		atbm_printk_pm("[PM]:up pm lock\n");
 	}
 	spin_unlock_bh(&hw_priv->wsm_pm_spin_lock);
 	#else
@@ -2396,15 +2521,16 @@ static int wsm_set_pm_indication(struct atbm_common *hw_priv,
 	#endif
 	return 0;
 }
-
 static int wsm_scan_complete_indication(struct atbm_common *hw_priv,
 					struct wsm_buf *buf)
 {
-
 	hw_priv->scan.wait_complete = 0;
+
 #ifdef ROAM_OFFLOAD
+#ifdef CONFIG_ATBM_SUPPORT_SCHED_SCAN
 	if(hw_priv->auto_scanning == 0)
 		wsm_oper_unlock(hw_priv);
+#endif
 #else
 
 	wsm_oper_unlock(hw_priv);
@@ -2414,6 +2540,12 @@ static int wsm_scan_complete_indication(struct atbm_common *hw_priv,
 		arg.status = WSM_GET32(buf);
 		arg.psm = WSM_GET8(buf);
 		arg.numChannels = WSM_GET8(buf);
+#ifndef SIGMSTAR_SCAN_FEATURE
+		if(hw_priv->scan.cca)
+			WSM_GET(buf, arg.busy_ratio, sizeof(arg.busy_ratio));
+#else //SIGMSTAR_SCAN_FEATURE
+	WSM_GET(buf, arg.busy_ratio, sizeof(arg.busy_ratio));		
+#endif //#ifdef SIGMSTAR_SCAN_FEATURE
 		hw_priv->wsm_cbc.scan_complete(hw_priv, &arg);
 	}
 	return 0;
@@ -2462,7 +2594,7 @@ static int wsm_suspend_resume_indication(struct atbm_common *hw_priv,
 
 		priv = ABwifi_hwpriv_to_vifpriv(hw_priv, arg.if_id);
 		if (unlikely(!priv)) {
-			wsm_printk(KERN_DEBUG "[WSM] suspend-resume indication"
+			wsm_printk( "[WSM] suspend-resume indication"
 				   " for removed interface!\n");
 			return 0;
 		}
@@ -2544,166 +2676,80 @@ int atbm_usb_ep0_cmd(struct sbus_priv *self);
 void atbm_usb_kill_all_txurb(struct sbus_priv *self);
 void atbm_usb_urb_map_show(struct sbus_priv *self);
 
-int wsm_recovery(struct atbm_common *hw_priv)
+//#if (PROJ_TYPE<ARES_B)
+int wsm_recovery_chip_athena(struct atbm_common *hw_priv)
 {
+#if (PROJ_TYPE_SUPPORT&ATBM_CHIP_SUPPORT_LESS(ARES_B))
+	if(atbm_bh_is_term(hw_priv)){
+		if(atomic_read(&hw_priv->bh_halt)){
+			return RECOVERY_BH_HALT;
+		}
+		goto error;
+	}
+	atbm_bh_halt(hw_priv);
+	return RECOVERY_BH_HALT;
+error:
+#endif //(PROJ_TYPE_SUPPORT&ATBM_CHIP_SUPPORT_LESS(ARES_B))
+	return RECOVERY_ERR;
+}
+//#else
+
+int wsm_recovery_chip_ares(struct atbm_common *hw_priv)
+{
+#if (PROJ_TYPE_SUPPORT&ATBM_CHIP_SUPPORT_PLUS_EQ(ARES_B))
 	
 	u32 addr = hw_priv->wsm_caps.HiHwCnfBufaddr;
-	int ret;
+	int ret=0;
 	u32 buf[DOWNLOAD_BLOCK_SIZE/4];
 	int tx_size=12;
 	struct atbm_EP0Cmd *cmd = (struct atbm_EP0Cmd *)buf;
-#if (PROJ_TYPE<ARES_B)
-	int loop=5;
-#endif	
+	
+	atbm_wifi_run_status_set(1);
+
 	if(atbm_bh_is_term(hw_priv)){
-		printk("wsm_recovery: bh is stop\n");
+		atbm_printk_err("wsm_recovery: bh is stop\n");
 		return RECOVERY_ERR;
 	}
-	printk("wsm_recovery++\n");
 	mdelay(100);
-	//atbm_usb_rxlock(hw_priv->sbus_priv);
 	__atbm_usb_suspend(hw_priv->sbus_priv);
-	wsm_lock_tx_async(hw_priv);
-	
-
-#if (PROJ_TYPE<ARES_B)
-step1:
-	/*
-	step1:	try to flush tx data in lmac
-	step2:	try to reinitil  lmac.clear all rx/tx data
-	*/
-	printk("wsm_recovery++step1 \n");
-	cmd->cmd_id=EP0_CMD_TXFLUSH;
-	cmd->lmac_seq=11;
-	cmd->hmac_seq=12;
-
-	//printk("wsm_recovery cmd_id %x buf %x tx_size %x addr %x\n",cmd->cmd_id,buf,tx_size,addr);
-	
-	/* send the block to sram */
-	ret = atbm_ep0_write(hw_priv,addr,buf, tx_size);
-	if (ret < 0) {
-		printk(KERN_ERR "%s:err\n",__func__);
-		goto error;
-
-	}
-	//printk("wsm_recovery atbm_usb_ep0_cmd\n");
-
-	atbm_usb_ep0_cmd(hw_priv->sbus_priv);
-
-	mdelay(500);
-	atbm_ep0_read(hw_priv,addr,buf, 4);
-	atbm_ep0_read(hw_priv,addr+4,buf+1, 4);
-	atbm_ep0_read(hw_priv,addr+8,buf+2, 4);
-	atbm_ep0_read(hw_priv,addr+12,buf+3, 4);
-	atbm_ep0_read(hw_priv,addr+16,buf+4, 4);
-	atbm_ep0_read(hw_priv,addr+20,buf+5, 4);
-	printk(KERN_ERR "wsm_recovery step1 hiReq %d,hiConf %d,lmaclastcmd %x\n", cmd->data[0], cmd->data[1],cmd->data[2]);
-	atbm_usb_urb_map_show(hw_priv->sbus_priv);
-	if(cmd->hmac_seq == cmd->lmac_seq){
-		if(cmd->data[0]==cmd->data[1]){
-			if(hw_priv->hw_bufs_used <0){
-				hw_priv->hw_bufs_used = 0;
-			}
-			if(hw_priv->hw_bufs_used_vif[0] <0){
-				hw_priv->hw_bufs_used_vif[0] = 0;
-			}
-			if(hw_priv->hw_bufs_used_vif[1] <0){
-				hw_priv->hw_bufs_used_vif[1] = 0;
-			}
-			wsm_unlock_tx_async(hw_priv);
-			return RECOVERY_STEP1_SUCCESS;
-		}
-		else {
-			loop--;
-			if(loop >0){
-				goto step1;
-			}
-			else{
-				goto step2;
-			}
-		}
-	}
-step2:
-#endif  //(PROJ_TYPE<ARES_B)
-	 {
+	wsm_lock_tx_async(hw_priv); 
+	{
 
 		//lmac may stuck,we need reinitial it
-		printk(KERN_ERR "step2 lmac may stuck,we need reinitial it\n");
-		cmd->cmd_id=EP0_CMD_RECOVERY;
-		cmd->lmac_seq=11;
-		cmd->hmac_seq=12;
-		tx_size=12;
+		atbm_printk_err("step2 lmac may stuck,we need reinitial it\n");
 		//printk("wsm_recovery EP0_CMD_RECOVERY %x buf %x tx_size %x addr %x\n",cmd->cmd_id,buf,tx_size,addr);
 		mdelay(100);
 		atbm_usb_kill_all_txurb(hw_priv->sbus_priv);
 		atbm_usb_kill_all_rxurb(hw_priv->sbus_priv);
-		mdelay(500);
-		
-#if (PROJ_TYPE<ARES_B)
-		/* send the block to sram */
-		ret = atbm_ep0_write(hw_priv,addr,buf, tx_size);
-		if (ret < 0) {
-			printk(KERN_ERR "%s:err\n",__func__);
-			goto error;
-		
-		}
-		//printk("wsm_recovery atbm_usb_ep0_cmd\n");
-		spin_lock_bh(&hw_priv->wsm_cmd.lock);
-			hw_priv->hw_bufs_used = 0;
-			hw_priv->hw_bufs_used_vif[0] = 0;
-			hw_priv->hw_bufs_used_vif[1] = 0;
-		//	hw_priv->wsm_tx_seq=0;
-		//	hw_priv->wsm_rx_seq=0;
-			spin_unlock_bh(&hw_priv->wsm_cmd.lock);
-		atbm_usb_ep0_cmd(hw_priv->sbus_priv);
-		//printk("wsm_recovery atbm_ep0_read\n");
-		atbm_ep0_read(hw_priv,addr,buf, 4);
-		atbm_ep0_read(hw_priv,addr+4,buf+1, 4);
-		atbm_ep0_read(hw_priv,addr+8,buf+2, 4);
-		atbm_ep0_read(hw_priv,addr+12,buf+3, 4);
-		atbm_ep0_read(hw_priv,addr+16,buf+4, 4);
-		printk(KERN_ERR "wsm_recovery step2 hiReq %d,hiConf %d,lmaclastcmd %x\n", cmd->data[0], cmd->data[1],cmd->data[2]);
-		if(cmd->hmac_seq == cmd->lmac_seq){		
-			{
-				int i=0;
-				for (i = 0; i < 4; ++i){
-					atbm_queue_clear(&hw_priv->tx_queue[i], ATBM_WIFI_ALL_IFS);
-				}
-				hw_priv->hw_bufs_used_vif[1] = 0;
-				hw_priv->hw_bufs_used_vif[0] = 0;
-				hw_priv->hw_bufs_used = 0;
-			}
-			wsm_unlock_tx_async(hw_priv);
-			return RECOVERY_STEP2_SUCCESS;
-		}
-#else //#if (PROJ_TYPE>=ARES_B)
-		/* send the block to sram */
-                ret = atbm_ep0_write(hw_priv,addr,buf, tx_size);
-                if (ret < 0) {
-                        printk(KERN_ERR "%s:err\n",__func__);
-                        goto error;
 
-                }
-
-		printk(KERN_ERR "wms_recoverycmd_id ARES_B \n");
+		atbm_printk_err("wms_recoverycmd_id ARES_B \n");
 		atbm_usb_ep0_hw_reset_cmd(hw_priv->sbus_priv,HW_RESET_HIF,1);
 		hw_priv->wsm_tx_seq=0;	
 		hw_priv->wsm_rx_seq=0;
 		mdelay(100);
+#define USB_RESET 0
+#if (USB_RESET==1) //This way has problem
+		ret=hw_priv->sbus_ops->usb_lock_reset(hw_priv->sbus_priv);
+		if(!ret){
+			mdelay(1000);
+			atbm_usb_ep0_hw_reset_cmd(hw_priv->sbus_priv,HW_RESET_HIF,1);
+		}
+#endif
+		mdelay(1000);
 		{
-			int retryCont = 0;
+		   int retryCont = 0;
 			while (1){
 			//printk("wsm_recovery atbm_ep0_read\n");
 				atbm_ep0_read(hw_priv,addr,buf, 4);
 				if(cmd->cmd_id == 0xffffabcd){
-					printk("wsm_recovery ARES_B cmd->cmd_id %x\n",cmd->cmd_id);
+					atbm_printk_err("wsm_recovery ARES_B cmd->cmd_id %x\n",cmd->cmd_id);
 					break;
 				}
 				mdelay(100);
 				retryCont++;
 				if (retryCont > 20)
 				{
-					printk("wsm_recovery ARES_B atbm_ep0_read retryCont timeout\n");
+					atbm_printk_err("wsm_recovery ARES_B atbm_ep0_read retryCont timeout\n");
 					break;
 				}
 			}
@@ -2714,7 +2760,7 @@ step2:
 			atbm_ep0_read(hw_priv,addr+12,buf+3, 4);
 			atbm_ep0_read(hw_priv,addr+16,buf+4, 4);
 			atbm_ep0_read(hw_priv,addr+20,buf+5, 4);
-			printk(KERN_ERR "wsm_recovery hiReq %d,hiConf %d,lmaclastcmd %x\n", cmd->data[0], cmd->data[1],cmd->data[2]);
+			atbm_printk_err("wsm_recovery hiReq %d,hiConf %d,lmaclastcmd %x\n", cmd->data[0], cmd->data[1],cmd->data[2]);
 			{
 				int i=0;
 				for (i = 0; i < 4; ++i){
@@ -2724,24 +2770,38 @@ step2:
 				hw_priv->hw_bufs_used_vif[0] = 0;
 				hw_priv->hw_bufs_used = 0;
 			}
-			mdelay(100);
-			//atbm_usb_rxunlock(hw_priv->sbus_priv);
+			/* send the block to sram */
+			memset(buf,0,DOWNLOAD_BLOCK_SIZE/4);
+			ret = atbm_ep0_write(hw_priv,addr,buf, tx_size);
+			if (ret < 0) {
+			        atbm_printk_err("%s:err\n",__func__);
+			        goto error;
+
+			}
+			mdelay(1000);
 			wsm_unlock_tx_async(hw_priv);
-			 __atbm_usb_resume(hw_priv->sbus_priv);
-			mdelay(100);
-			 /*atbm receive packet form the device*/
-			//hw_priv->sbus_ops->lock(hw_priv->sbus_priv);
-			//hw_priv->sbus_ops->sbus_memcpy_fromio(hw_priv->sbus_priv,0x2,NULL,RX_BUFFER_SIZE);
-			//hw_priv->sbus_ops->unlock(hw_priv->sbus_priv);
+			 __atbm_usb_resume(hw_priv->sbus_priv);			
 			return RECOVERY_STEP2_SUCCESS;
 		}
-#endif //#if (PROJ_TYPE<ARES_B)
 	}
-//	atbm_usb_rxunlock(hw_priv->sbus_priv);
+error:
 	wsm_unlock_tx_async(hw_priv);
 	__atbm_usb_resume(hw_priv->sbus_priv);
-error:
+#endif
 	return RECOVERY_ERR;
+}
+
+int wsm_recovery(struct atbm_common *hw_priv)
+{
+	//#if (PROJ_TYPE<ARES_B)
+	if(hw_priv->chip_version <ARES_B){
+		return wsm_recovery_chip_athena(hw_priv);
+	}
+	else {
+	//#else
+		return wsm_recovery_chip_ares(hw_priv);
+	}
+	//#endif
 }
 int  wsm_recovery_done(struct atbm_common *hw_priv,int type){
    return RECOVERY_STEP2_SUCCESS;
@@ -2759,9 +2819,11 @@ int  wsm_sync_channle_process(struct atbm_common *hw_priv,int type)
 }
 int wsm_recovery(struct atbm_common *hw_priv)
 {
-#if(PROJ_TYPE < ARES_A)
-	return RECOVERY_ERR;
-#endif
+//#if(PROJ_TYPE < ARES_A)
+	if(hw_priv->chip_version <ARES_A){
+		return RECOVERY_ERR;
+	}
+//#endif
 	if(hw_priv->syncChanl_done==0){
 	  return RECOVERY_STEP1_SUCCESS;
 	}
@@ -2774,12 +2836,12 @@ int  wsm_recovery_done(struct atbm_common *hw_priv,int type)
 {
 	int status;
 	if(type==OUT_BH){
-	    status=wait_event_interruptible_timeout(hw_priv->wsm_synchanl_done,hw_priv->syncChanl_done,60*HZ);
+	    status=wait_event_interruptible_timeout(hw_priv->wsm_synchanl_done,hw_priv->syncChanl_done,120*HZ);
 	}else{
-		status=wait_event_interruptible_timeout(hw_priv->bh_wq,ATBM_APOLLO_BH_SUSPEND == atomic_read(&hw_priv->bh_suspend),60*HZ);
+		status=wait_event_interruptible_timeout(hw_priv->bh_wq,ATBM_APOLLO_BH_SUSPEND == atomic_read(&hw_priv->bh_suspend),120*HZ);
 	}
     if(status<=0){
-        printk("sync Channle timeout,what happend !!!\n");
+        atbm_printk_err("sync Channle timeout,what happend !!!\n");
         return RECOVERY_ERR;
     }
 	return RECOVERY_STEP2_SUCCESS;
@@ -2788,7 +2850,14 @@ int  wsm_recovery_done(struct atbm_common *hw_priv,int type)
 
 /* ******************************************************************** */
 /* WSM TX								*/
-
+static void wsm_cmd_hif_ximt(struct atbm_common *hw_priv)
+{
+	if(!hw_priv->sbus_ops->sbus_wsm_write){
+		atbm_bh_wakeup(hw_priv);
+	}else {
+		hw_priv->sbus_ops->sbus_wsm_write(hw_priv->sbus_priv);
+	}
+}
 int wsm_cmd_send(struct atbm_common *hw_priv,
 		 struct wsm_buf *buf,
 		 void *arg, u16 cmd, long tmo, int if_id)
@@ -2797,24 +2866,18 @@ int wsm_cmd_send(struct atbm_common *hw_priv,
 	struct wsm_hdr_tx * wsm_h = (struct wsm_hdr_tx *)buf->begin;
 	int ret;	
 	if(atbm_bh_is_term(hw_priv)){
+		atbm_printk_err("bh_thread %p,bh_error %d pluged %d\n",(hw_priv->bh_thread), (hw_priv->bh_error),(atomic_read(&hw_priv->atbm_pluged)));
 		wsm_buf_reset(buf);
+		atbm_hif_status_set(1);
 		return -3;
 	}
 	
-#ifdef RESET_CHANGE
-	if (atomic_read(&hw_priv->fw_reloading))
-	{
-		wsm_buf_reset(buf);
-		return -2;
-		//cmd can not transmit,return now
-	}
-#endif
 	if (cmd == 0x0006) /* Write MIB */
-		wsm_printk(KERN_DEBUG "[WSM] >>> 0x%.4X [MIB: 0x%.4X] (%d)\n",
+		wsm_printk( "[WSM] >>> 0x%.4X [MIB: 0x%.4X] (%ld)\n",
 			cmd, __le16_to_cpu(((__le16 *)buf->begin)[sizeof(struct wsm_hdr_tx)/2]),
 			buf_len);
 	else
-		wsm_printk(KERN_DEBUG "[WSM] >>> 0x%.4X (%d)\n", cmd, buf_len);
+		wsm_printk( "[WSM] >>> 0x%.4X (%ld)\n", cmd, buf_len);
 
 	/* Fill HI message header */
 	/* BH will add sequence number */
@@ -2830,8 +2893,8 @@ int wsm_cmd_send(struct atbm_common *hw_priv,
 	wsm_h = (struct wsm_hdr_tx *)buf->begin;
 #ifdef USB_BUS_BUG	
 	wsm_h->usb_len =__cpu_to_le16(buf_len);
-	if (__cpu_to_le16(buf_len)<1538)
-		wsm_h->usb_len=1538;
+	if (buf_len<1538)
+		wsm_h->usb_len=__cpu_to_le16(1538);
 	wsm_h->usb_id =  __cpu_to_le16(cmd |(if_id << 6) );
 #endif
 #ifdef ATBM_SDIO_PATCH
@@ -2859,21 +2922,14 @@ TxCmdAgain:
 	hw_priv->wsm_cmd.len = buf_len;
 	hw_priv->wsm_cmd.arg = arg;
 	hw_priv->wsm_cmd.cmd = cmd;
-#ifdef RESET_CHANGE
-	if (atomic_read(&hw_priv->fw_reloading))
-	{
-		hw_priv->wsm_cmd.done = 1;//cmd can not transmit,return now
-	}
-#endif
 	spin_unlock_bh(&hw_priv->wsm_cmd.lock);
 	hw_priv->sbus_ops->power_mgmt(hw_priv->sbus_priv, false);
 
 #ifdef USB_CMD_UES_EP0
 	atbm_ep0_write_cmd(hw_priv,wsm_h);
 #else
-	atbm_bh_wakeup(hw_priv);
+	wsm_cmd_hif_ximt(hw_priv);
 #endif
-
 	if (unlikely(hw_priv->bh_error)||atbm_bh_is_term(hw_priv)) {
 		/* Do not wait for timeout if BH is dead. Exit immediately. */
 		ret = 0;
@@ -2900,16 +2956,13 @@ TxCmdAgain:
 			ret = atbm_wait_event_timeout_stay_awake(hw_priv,
 					hw_priv->wsm_cmd_wq,
 					hw_priv->wsm_cmd.done
-#ifdef RESET_CHANGE
-					|atomic_read(&hw_priv->fw_reloading)
-#endif
 					, tmo,true);
 			wsm_cmd_runtime = jiffies - wsm_cmd_starttime;
 			if(!ret  &&
 					wsm_cmd_runtime < wsm_cmd_max_tmo && 
 					(atomic_read(&hw_priv->bh_term)!=0)){
 				//wakeup again
-				atbm_bh_wakeup(hw_priv);
+				wsm_cmd_hif_ximt(hw_priv);
 			}
 		} while (!ret  &&
 					wsm_cmd_runtime < wsm_cmd_max_tmo && 
@@ -2917,31 +2970,25 @@ TxCmdAgain:
 	}
 	if (unlikely(ret == 0)) {	
 		int ret_flush; 
-		printk("wsm_cmd_send cmd(%x) not send to fw wsm_recovery last_send_cmd %x\n",hw_priv->wsm_cmd.cmd,hw_priv->wsm_cmd.last_send_cmd);
+		atbm_printk_err("wsm_cmd_send cmd(%x) not send to fw wsm_recovery last_send_cmd %x\n",hw_priv->wsm_cmd.cmd,hw_priv->wsm_cmd.last_send_cmd);
 		#ifdef SDIO_BUS
 		ret_flush=wsm_sync_channle_process(hw_priv,OUT_BH);
 		#else
 		ret_flush=wsm_recovery(hw_priv);
 		#endif
 		//printk("wsm_cmd_send cmd(%x) not send to fw\n",hw_priv->wsm_cmd.cmd);
-		printk(KERN_ERR "wsm_cmd_send,buffused(%d) ret_flush %x\n",hw_priv->hw_bufs_used,ret_flush);
-		if( ret_flush != RECOVERY_ERR){
+		atbm_printk_err("wsm_cmd_send,buffused(%d) ret_flush %x\n",hw_priv->hw_bufs_used,ret_flush);
+		if( (ret_flush != RECOVERY_ERR)&&(ret_flush != RECOVERY_BH_HALT)){
 			ret = atbm_wait_event_timeout_stay_awake(hw_priv,
 								hw_priv->wsm_cmd_wq,
 								hw_priv->wsm_cmd.done
-#ifdef RESET_CHANGE
-								|atomic_read(&hw_priv->fw_reloading)
-#endif
 								, 3*HZ,true);
 			
 			if((ret ==0) 
 				&& (hw_priv->wsm_cmd.ptr==NULL)
 				&& (hw_priv->wsm_cmd.cmd != 0xFFFF)
-#ifdef RESET_CHANGE
-				&& (atomic_read(&hw_priv->fw_reloading)==0)
-#endif
 				){
-					printk("wsm_cmd_send cmd(%x) retry to fw\n",hw_priv->wsm_cmd.cmd);
+					atbm_printk_err("wsm_cmd_send cmd(%x) retry to fw\n",hw_priv->wsm_cmd.cmd);
 					spin_lock_bh(&hw_priv->wsm_cmd.lock);
 					//hw_priv->hw_bufs_used = 0;
 					//hw_priv->hw_bufs_used_vif[0] = 0;
@@ -2954,7 +3001,7 @@ TxCmdAgain:
 					//hw_priv->wsm_tx_seq=0;
 					//hw_priv->wsm_rx_seq=0;
 					spin_unlock_bh(&hw_priv->wsm_cmd.lock);
-					atbm_bh_wakeup(hw_priv);
+					wsm_cmd_hif_ximt(hw_priv);
 					mdelay(100);
 					ret = atbm_wait_event_timeout_stay_awake(hw_priv,
 										hw_priv->wsm_cmd_wq,
@@ -2963,8 +3010,8 @@ TxCmdAgain:
 			else {
 				//(hw_priv->wsm_cmd.ptr==NULL)
 				//bh_wakeup 
-				printk("wsm_cmd_send cmd(%x) retry to wakeup usb to send ptr %p\n",hw_priv->wsm_cmd.cmd,hw_priv->wsm_cmd.ptr);
-				atbm_bh_wakeup(hw_priv);
+				atbm_printk_err("wsm_cmd_send cmd(%x) retry to wakeup usb to send ptr %p\n",hw_priv->wsm_cmd.cmd,hw_priv->wsm_cmd.ptr);
+				wsm_cmd_hif_ximt(hw_priv);
 				ret = atbm_wait_event_timeout_stay_awake(hw_priv,
 									hw_priv->wsm_cmd_wq,
 									hw_priv->wsm_cmd.done, WSM_CMD_DEFAULT_TIMEOUT,true);
@@ -2974,7 +3021,7 @@ TxCmdAgain:
 				ret = 1;
 			}
 			if(ret_flush==RECOVERY_STEP2_SUCCESS){	
-				printk("hw_priv->scan.wait_complete %d\n",hw_priv->scan.wait_complete);
+				atbm_printk_err("hw_priv->scan.wait_complete %d\n",hw_priv->scan.wait_complete);
 				if(hw_priv->scan.wait_complete){
 				//	atbm_hw_priv_queue_delayed_work(hw_priv, &hw_priv->scan.timeout,
 				//		HZ / 10);
@@ -2982,6 +3029,15 @@ TxCmdAgain:
 				}
 				
 			}
+		}else if(RECOVERY_BH_HALT == ret_flush){
+			spin_lock_bh(&hw_priv->wsm_cmd.lock);
+			hw_priv->wsm_cmd.done = 1;
+			ret = -1;
+			hw_priv->wsm_cmd.ret = -1;
+			hw_priv->wsm_cmd.arg = NULL;
+			hw_priv->wsm_cmd.ptr = NULL;
+			hw_priv->wsm_cmd.cmd = 0xFFFF;
+			spin_unlock_bh(&hw_priv->wsm_cmd.lock);
 		}
 	}
 
@@ -2991,9 +3047,9 @@ TxCmdAgain:
 		spin_lock_bh(&hw_priv->wsm_cmd.lock);
 		raceCheck = hw_priv->wsm_cmd.cmd;
 		if(hw_priv->wsm_cmd.ptr){
-			printk("wsm_cmd_send cmd not send to fw\n");
+			atbm_printk_err("wsm_cmd_send cmd not send to fw\n");
 		}
-		printk(KERN_ERR "wsm_cmd_send,buffused(%d)\n",hw_priv->hw_bufs_used);
+		atbm_printk_err("wsm_cmd_send,buffused(%d)\n",hw_priv->hw_bufs_used);
 		hw_priv->wsm_cmd.arg = NULL;
 		hw_priv->wsm_cmd.ptr = NULL;
 		spin_unlock_bh(&hw_priv->wsm_cmd.lock);
@@ -3008,12 +3064,9 @@ TxCmdAgain:
 			BUG_ON(atbm_wait_event_timeout_stay_awake(hw_priv,
 					hw_priv->wsm_cmd_wq,
 					hw_priv->wsm_cmd.done
-#ifdef RESET_CHANGE
-					|atomic_read(&hw_priv->fw_reloading)
-#endif
 		,WSM_CMD_LAST_CHANCE_TIMEOUT,true) <= 0);
 		}
-		printk("wsm_cmd_send timeout cmd %x tmo %ld\n",cmd,tmo);
+		atbm_printk_err("wsm_cmd_send timeout cmd %x tmo %ld\n",cmd,tmo);
 		
 #ifdef ATBM_SDIO_PATCH
 		//sync channle
@@ -3022,32 +3075,26 @@ TxCmdAgain:
 		schedule_work(&hw_priv->wsm_sync_channl);
 		wait_event_interruptible(hw_priv->wsm_synchanl_done,hw_priv->syncChanl_done);
 		{
-			printk("O'My GOD CMD TIMEOUT....Again\n");
+			atbm_printk_err("O'My GOD CMD TIMEOUT....Again\n");
 			hw_priv->syncChanl_done=0;
 			goto TxCmdAgain;
 		}
 #endif
 		/* Kill BH thread to report the error to the top layer. */
-		hw_priv->bh_error = 1;
-		wake_up(&hw_priv->bh_wq);
+		//hw_priv->bh_error = 1;
+		
+		//wake_up(&hw_priv->bh_wq);
+		atbm_bh_halt(hw_priv);
 		ret = -ETIMEDOUT;
 	} else {
 		spin_lock_bh(&hw_priv->wsm_cmd.lock);
 		BUG_ON(!hw_priv->wsm_cmd.done);
-#ifdef RESET_CHANGE
-		if(atomic_read(&hw_priv->fw_reloading))
-		{
-			hw_priv->wsm_cmd.ptr = NULL;
-			ret = -1;
-		}
-		else
-#endif
 		ret = hw_priv->wsm_cmd.ret;
 		spin_unlock_bh(&hw_priv->wsm_cmd.lock);
 	}
 #ifdef ATBM_SDIO_PATCH
 	if(ret==WSM_CMD_CRC_ERRO){
-		printk("O'My GOD CRC ERR....Again\n");
+		atbm_printk_err("O'My GOD CRC ERR....Again\n");
 		goto TxCmdAgain;
 	}else
 #endif
@@ -3066,7 +3113,7 @@ void wsm_lock_tx(struct atbm_common *hw_priv)
 	wsm_cmd_lock(hw_priv);
 	if (atomic_add_return(1, &hw_priv->tx_lock) == 1) {
 		if (wsm_flush_tx(hw_priv))
-			wsm_printk(KERN_DEBUG "[WSM] TX is locked.\n");
+			wsm_printk( "[WSM] TX is locked.\n");
 	}
 	wsm_cmd_unlock(hw_priv);
 }
@@ -3077,7 +3124,7 @@ void wsm_vif_lock_tx(struct atbm_vif *priv)
 	wsm_cmd_lock(hw_priv);
 	if (atomic_add_return(1, &hw_priv->tx_lock) == 1) {
 		if (wsm_vif_flush_tx(priv))
-			wsm_printk(KERN_DEBUG "[WSM] TX is locked for"
+			wsm_printk( "[WSM] TX is locked for"
 					" if_id %d.\n", priv->if_id);
 	}
 	wsm_cmd_unlock(hw_priv);
@@ -3086,7 +3133,7 @@ void wsm_vif_lock_tx(struct atbm_vif *priv)
 void wsm_lock_tx_async(struct atbm_common *hw_priv)
 {
 	if (atomic_add_return(1, &hw_priv->tx_lock) == 1)
-		wsm_printk(KERN_DEBUG "[WSM] TX is locked (async).\n");
+		wsm_printk( "[WSM] TX is locked (async).\n");
 }
 
 void wsm_unlock_tx_async(struct atbm_common *hw_priv)
@@ -3113,18 +3160,25 @@ bool wsm_flush_tx(struct atbm_common *hw_priv)
 	/* First check if we really need to do something.
 	 * It is safe to use unprotected access, as hw_bufs_used
 	 * can only decrements. */
+#ifdef ATBM_SDIO_PATCH
+	if ((hw_priv->hw_bufs_used)){
+                atomic_set(&hw_priv->flushed, 1);
+                hw_priv->hw_bufs_used=0;
+         }
+#endif
 
-	if (!(hw_priv->hw_bufs_used))
+	if (!(hw_priv->hw_bufs_used)){
 		return true;
+	}
 
 	if(atbm_bh_is_term(hw_priv)){
-		hw_priv->bh_error = 1;
+//		hw_priv->bh_error = 1;
 		return false;
 	}
 
 	if (hw_priv->bh_error) {
 		/* In case of failure do not wait for magic. */
-		wsm_printk(KERN_ERR "[WSM] Fatal error occured, "
+		wsm_printk( "[WSM] Fatal error occured, "
 				"will not flush TX.\n");
 		return false;
 	} else {
@@ -3140,7 +3194,7 @@ bool wsm_flush_tx(struct atbm_common *hw_priv)
 
 		timeout=WSM_CMD_LAST_CHANCE_TIMEOUT;
 		if (atbm_wait_event_timeout_stay_awake(hw_priv,hw_priv->bh_evt_wq,!(hw_priv->hw_bufs_used),timeout,true) <= 0) {
-			printk(KERN_ERR "%s:+++++  bh_error=1 have txframe pending hw_bufs_used %d,timeout =%d\n", __func__,(u32)hw_priv->hw_bufs_used,(u32)timeout);
+			atbm_printk_err( "+++++  bh_error=1 have txframe pending hw_bufs_used %d,timeout =%d\n",(u32)hw_priv->hw_bufs_used,(u32)timeout);
 			if(!(hw_priv->hw_bufs_used)){
 			/* Get a timestamp of "oldest" frame */
                 	  for (i = 0; i < 4; ++i)
@@ -3149,11 +3203,11 @@ bool wsm_flush_tx(struct atbm_common *hw_priv)
                                         &timestamp, ATBM_WIFI_ALL_IFS,
                                         0xffffffff);
 
-			   printk("%s <WARNING hw_bufs_use==0,pending %x,but wait imeout!!!!!!\n",__func__,pending);
+			   atbm_printk_err("<WARNING hw_bufs_use==0,pending %x,but wait imeout!!!!!!\n",pending);
 			   
 			   return true;
 			}
-			printk(KERN_ERR "%s:+++++  bh_error=1 have txframe pending hw_bufs_used %d,timeout =%d\n", __func__,(u32)hw_priv->hw_bufs_used,(u32)timeout);
+			atbm_printk_err("+++++  bh_error=1 have txframe pending hw_bufs_used %d,timeout =%d\n",(u32)hw_priv->hw_bufs_used,(u32)timeout);
 			if(!(hw_priv->hw_bufs_used)){
 			/* Get a timestamp of "oldest" frame */
                 	  for (i = 0; i < 4; ++i)
@@ -3162,13 +3216,17 @@ bool wsm_flush_tx(struct atbm_common *hw_priv)
                                         &timestamp, ATBM_WIFI_ALL_IFS,
                                         0xffffffff);
 
-			   printk("%s <WARNING hw_bufs_use==0,pending %x,but wait imeout!!!!!!\n",__func__,pending);
+			   atbm_printk_err("<WARNING hw_bufs_use==0,pending %x,but wait imeout!!!!!!\n",pending);
 			   
 			   return true;
 			}
 			//				
-			printk(KERN_ERR "%s:  bh_error=1 have txframe pending hw_bufs_used %d,hw_noconfirm_tx %d,timeout =%d\n", __func__,(u32)hw_priv->hw_bufs_used,hw_priv->hw_noconfirm_tx,(u32)timeout);
+			atbm_printk_err("bh_error=1 have txframe pending hw_bufs_used %d,hw_noconfirm_tx %d,timeout =%d\n",(u32)hw_priv->hw_bufs_used,hw_priv->hw_noconfirm_tx,(u32)timeout);
+#ifdef SDIO_BUS
+			if(wsm_sync_channle_process(hw_priv,OUT_BH)>=0){
+#else
 			if(wsm_recovery(hw_priv)>=0){
+#endif		
 				for (i = 0; i < 4; ++i){
 					atbm_queue_clear(&hw_priv->tx_queue[i], ATBM_WIFI_ALL_IFS);
 				}
@@ -3178,10 +3236,11 @@ bool wsm_flush_tx(struct atbm_common *hw_priv)
 			}
 			else {
 				/* Hmmm... Not good. Frame had stuck in firmware. */
-				hw_priv->bh_error = 1;
-				printk(KERN_ERR "%s:  bh_error=1 have txframe pending hw_bufs_used %d,timeout =%d\n", __func__,(u32)hw_priv->hw_bufs_used,(u32)timeout);
+//				hw_priv->bh_error = 1;
+				atbm_printk_err("bh_error=1 have txframe pending hw_bufs_used %d,timeout =%d\n",(u32)hw_priv->hw_bufs_used,(u32)timeout);
 				WARN_ON(1);
-				wake_up(&hw_priv->bh_wq);
+//				wake_up(&hw_priv->bh_wq);
+				atbm_bh_halt(hw_priv);
 				return false;
 			}
 		}
@@ -3212,12 +3271,12 @@ bool wsm_vif_flush_tx(struct atbm_vif *priv)
 	spin_lock_bh(&hw_priv->SeqBitMapLock);
 	list_for_each_entry_safe(bitmap,tmp,&hw_priv->SeqBitMapList,link){
 		if(bitmap->bitm.DataFlag!=IS_CMD){//data
-			atbm_release_hmac_buffer(hw_priv,bitmap->bitm.packetId);
+			atbm_release_hmac_buffer(hw_priv,bitmap->bitm.packetId,WSM_DATA_CRC_ERRO);
 			//del the linkNode
 			list_del(&bitmap->link);
 			//free bitmap
 			atbm_kfree(bitmap);
-			printk("hw_bufs_used_vif[%d] =%d,bitmap->bitm.packetId =%d\n",priv->if_id,hw_priv->hw_bufs_used_vif[priv->if_id],bitmap->bitm.packetId);
+			atbm_printk_err("hw_bufs_used_vif[%d] =%d,bitmap->bitm.packetId =%d\n",priv->if_id,hw_priv->hw_bufs_used_vif[priv->if_id],bitmap->bitm.packetId);
 		}
 	}	
 	spin_unlock_bh(&hw_priv->SeqBitMapLock);
@@ -3243,10 +3302,14 @@ bool wsm_vif_flush_tx(struct atbm_vif *priv)
 				!hw_priv->hw_bufs_used_vif[if_id],
 				timeout,true) <= 0) {
 
-			printk(KERN_ERR "%s:++  bh_error=1 hw_bufs_used_vif %d,hw_bufs_used %d,timeout %ld\n", __func__,
+			atbm_printk_err("%s:++  bh_error=1 hw_bufs_used_vif %d,hw_bufs_used %d,timeout %ld\n", __func__,
 						hw_priv->hw_bufs_used_vif[priv->if_id],hw_priv->hw_bufs_used,timeout);
 			//			
+#ifdef SDIO_BUS
+			if(wsm_sync_channle_process(hw_priv,OUT_BH)>=0){
+#else
 			if(wsm_recovery(hw_priv)>=0){
+#endif						
 				//clear all
 				for (i = 0; i < 4; ++i){
 					atbm_queue_clear(&hw_priv->tx_queue[i], ATBM_WIFI_ALL_IFS);
@@ -3257,11 +3320,12 @@ bool wsm_vif_flush_tx(struct atbm_vif *priv)
 			else {
 
 				/* Hmmm... Not good. Frame had stuck in firmware. */
-				hw_priv->bh_error = 1;
-				printk(KERN_ERR "%s:  bh_error=1 hw_bufs_used_vif %d,hw_bufs_used %d,timeout %ld\n", __func__,
+//				hw_priv->bh_error = 1;
+				atbm_printk_err("%s:  bh_error=1 hw_bufs_used_vif %d,hw_bufs_used %d,timeout %ld\n", __func__,
 						hw_priv->hw_bufs_used_vif[priv->if_id],hw_priv->hw_bufs_used,timeout);
 				WARN_ON(1);
-				wake_up(&hw_priv->bh_wq);
+//				wake_up(&hw_priv->bh_wq);
+				atbm_bh_halt(hw_priv);
 				return false;
 			}
 		}
@@ -3275,12 +3339,8 @@ void wsm_unlock_tx(struct atbm_common *hw_priv)
 {
 	int tx_lock;
 	if (hw_priv->bh_error
-#ifdef RESET_CHANGE
-		&&
-		(atomic_read(&hw_priv->reset_flag)==0)
-#endif
 		)
-		wsm_printk(KERN_ERR "fatal error occured, unlock is unsafe\n");
+		atbm_printk_err("fatal error occured, unlock is unsafe\n");
 	else {
 		tx_lock = atomic_sub_return(1, &hw_priv->tx_lock);
 		if (tx_lock < 0) {
@@ -3329,32 +3389,30 @@ int wsm_handle_exception(struct atbm_common *hw_priv, u8 *data, u32 len)
 	WSM_GET(&buf, fname, sizeof(fname));
 
 
-	wiphy_err(hw_priv->hw->wiphy,
-			"Firmware assert at %d,%s, line %d\n",
+	atbm_printk_always("Firmware assert at %d,%s, line %d\n",
 			(int)sizeof(fname), fname, (int)reg[1]);
 
 	for (i = 0; i < 12; i += 4)
-		wiphy_err(hw_priv->hw->wiphy,
-			"R%d: 0x%.8X, R%d: 0x%.8X, R%d: 0x%.8X, R%d: 0x%.8X,\n",
+		atbm_printk_always("R%d: 0x%.8X, R%d: 0x%.8X, R%d: 0x%.8X, R%d: 0x%.8X,\n",
 			i + 0, reg[i + 0], i + 1, reg[i + 1],
 			i + 2, reg[i + 2], i + 3, reg[i + 3]);
-	wiphy_err(hw_priv->hw->wiphy,
-		"R12: 0x%.8X, SP: 0x%.8X, LR: 0x%.8X, PC: 0x%.8X,\n",
+	atbm_printk_always("R12: 0x%.8X, SP: 0x%.8X, LR: 0x%.8X, PC: 0x%.8X,\n",
 		reg[i + 0], reg[i + 1], reg[i + 2], reg[i + 3]);
 	i += 4;
-	wiphy_err(hw_priv->hw->wiphy,
-		"CPSR: 0x%.8X, SPSR: 0x%.8X\n",
+	atbm_printk_always("CPSR: 0x%.8X, SPSR: 0x%.8X\n",
 		reg[i + 0], reg[i + 1]);
 
 	print_hex_dump_bytes("R1: ", DUMP_PREFIX_NONE,
 		fname, sizeof(fname));
+
+	atbm_wifi_run_status_set(1);
 	return 0;
 
 underflow:
-	wiphy_err(hw_priv->hw->wiphy,
-		"Firmware exception.\n");
+	atbm_printk_always("Firmware exception.\n");
 	print_hex_dump_bytes("Exception: ", DUMP_PREFIX_NONE,
 		data, len);
+	atbm_wifi_run_status_set(1);
 	return -EINVAL;
 }
 #if 0
@@ -3395,18 +3453,9 @@ int wsm_handle_rx(struct atbm_common *hw_priv, int id,
 	wsm_buf.data = (u8 *)&wsm[1];
 	wsm_buf.end = &wsm_buf.begin[__le32_to_cpu(wsm->len)];
 
-	wsm_printk(KERN_DEBUG "[WSM][vid=%d] <<< 0x%.4X (%d)\n",interface_link_id, id,
+	wsm_printk("[WSM][vid=%d] <<< 0x%.4X (%d)\n",interface_link_id, id,
 			wsm_buf.end - wsm_buf.begin);
 //	frame_hexdump(__func__,(u32*)wsm,32);
-#ifdef RESET_CHANGE
-	if (atomic_read(&hw_priv->fw_reloading)&&(id!=WSM_STARTUP_IND_ID))
-	{
-		hw_priv->wsm_rx_seq=0;
-		//cmd can not transmit,return now
-		return ret;
-		
-	}
-#endif
 #ifdef ATBM_SDIO_PATCH
 	if (id == WSM_SEQ_BIT_MAP_ID) {
 		ret=wsm_tx_release_bufused(hw_priv, &wsm_buf, interface_link_id);
@@ -3431,7 +3480,7 @@ int wsm_handle_rx(struct atbm_common *hw_priv, int id,
 	else if (id == WSM_FIRMWARE_CHECK_CONFIRM_ID) {
 		//ret = wsm_multi_tx_confirm(hw_priv, &wsm_buf,
 		//			   interface_link_id);
-		printk("WSM_FIRMWARE_CHECK_CONFIRM_ID \n");
+		atbm_printk_bus("WSM_FIRMWARE_CHECK_CONFIRM_ID \n");
 
 	}
 	else if (id == WSM_LEGACY_MULTI_TX_CNF_ID) {
@@ -3448,7 +3497,8 @@ int wsm_handle_rx(struct atbm_common *hw_priv, int id,
 		wsm_arg = hw_priv->wsm_cmd.arg;
 		wsm_cmd = hw_priv->wsm_cmd.cmd &
 				~WSM_TX_LINK_ID(WSM_TX_LINK_ID_MAX);
-		hw_priv->wsm_cmd.cmd = 0xFFFF;
+		hw_priv->wsm_cmd.last_send_cmd=hw_priv->wsm_cmd.cmd = 0xFFFF;
+		
 		spin_unlock_bh(&hw_priv->wsm_cmd.lock);
 		
 		if (WARN_ON((id & ~WSM_CNF_BASE) != wsm_cmd)) {
@@ -3525,10 +3575,11 @@ int wsm_handle_rx(struct atbm_common *hw_priv, int id,
 #endif
 
 #ifdef ATBM_SUPPORT_WIDTH_40M
-
+#ifdef CONFIG_ATBM_40M_AUTO_CCA
 		case WSM_GET_CCA_RESP_ID:
 			 ret = wsm_get_cca_confirm(hw_priv,wsm_arg,&wsm_buf);
 			 break;
+#endif
 #endif
 		case WSM_STOP_SCAN_RESP_ID: /* stop-scan */
 			{
@@ -3536,6 +3587,7 @@ int wsm_handle_rx(struct atbm_common *hw_priv, int id,
 				break;
 			}
 		case WSM_START_SCAN_RESP_ID: /* start-scan */
+#ifdef CONFIG_ATBM_SUPPORT_SCHED_SCAN
 #ifdef ROAM_OFFLOAD
 			if (hw_priv->auto_scanning) {
 				if (atomic_read(&hw_priv->scan.in_progress)) {
@@ -3548,6 +3600,7 @@ int wsm_handle_rx(struct atbm_common *hw_priv, int id,
 			}
 	
 #endif /*ROAM_OFFLOAD*/
+#endif
 			//must be no break here!!!!!!!!!!!!!
 #ifdef ATBM_SUPPORT_WIDTH_40M
 		case WSM_SET_CHANTYPE_RESP_ID:
@@ -3571,8 +3624,7 @@ int wsm_handle_rx(struct atbm_common *hw_priv, int id,
 			WARN_ON(wsm_arg != NULL);
 			ret = wsm_generic_confirm(hw_priv, wsm_arg, &wsm_buf);
 			if (ret)
-				wiphy_warn(hw_priv->hw->wiphy,
-					"wsm_generic_confirm "
+				atbm_printk_warn("wsm_generic_confirm "
 					"failed for request 0x%.4X.\n",
 					id & ~0x0400);
 			break;
@@ -3614,6 +3666,7 @@ int wsm_handle_rx(struct atbm_common *hw_priv, int id,
 			ret = wsm_set_pm_indication(hw_priv, &wsm_buf);
 			break;
 		case WSM_SCAN_COMPLETE_IND_ID:
+#ifdef CONFIG_ATBM_SUPPORT_SCHED_SCAN
 #ifdef ROAM_OFFLOAD
 			if(hw_priv->auto_scanning && hw_priv->frame_rcvd) {
 				struct atbm_vif *priv;
@@ -3641,7 +3694,7 @@ int wsm_handle_rx(struct atbm_common *hw_priv, int id,
 
 					hw_priv->beacon_bkp = NULL;
 				}
-				wsm_printk(KERN_DEBUG \
+				wsm_printk( \
 				"[WSM] Send Testmode Event.\n");
 				atbm_testmode_event(priv->hw->wiphy,
 					NL80211_CMD_NEW_SCAN_RESULTS, 0,
@@ -3649,6 +3702,7 @@ int wsm_handle_rx(struct atbm_common *hw_priv, int id,
 
 			}
 #endif /*ROAM_OFFLOAD*/
+#endif
 			ret = wsm_scan_complete_indication(hw_priv, &wsm_buf);
 			break;
 		case WSM_FIND_CMPL_IND_ID:
@@ -3662,15 +3716,18 @@ int wsm_handle_rx(struct atbm_common *hw_priv, int id,
 			ret = wsm_debug_indication(hw_priv, &wsm_buf);
 			break;
 #ifdef ATBM_SUPPORT_WIDTH_40M
+#ifdef CONFIG_ATBM_40M_AUTO_CCA
 		case WSM_SEND_CHTYPE_CHG_REQUEST_IND_ID:
 			ret = wsm_req_chtype_indication(hw_priv, &wsm_buf);
 			break;
+#endif
 #endif
 		default:
 			//STUB();
 			break;
 		}
 	} else {
+		atbm_printk_err("%s:id(%x)\n",__func__,id);
 		WARN_ON(1);
 		ret = -EINVAL;
 	}
@@ -3709,17 +3766,9 @@ static bool wsm_handle_tx_data(struct atbm_vif *priv,
 	frame =  (struct ieee80211_hdr *) &((u8 *)wsm)[txpriv->offset];
 	fctl  = frame->frame_control;
 
-#ifdef RESET_CHANGE
-
-	if(atomic_read(&hw_priv->reset_flag))
-	{
-		printk("%s:doDrop,hmac resetting\n",__func__);
-		action = doDrop;
-	}
-	else
-#endif
 	switch (priv->mode) {
 	case NL80211_IFTYPE_STATION:
+#ifndef CONFIG_TX_NO_CONFIRM
 		if (unlikely((priv->join_status == ATBM_APOLLO_JOIN_STATUS_STA) &&
 			ieee80211_is_nullfunc(fctl))) {
 			spin_lock_bh(&priv->bss_loss_lock);
@@ -3729,10 +3778,23 @@ static bool wsm_handle_tx_data(struct atbm_vif *priv,
 				priv->bss_loss_confirm_id = wsm->packetID;
 			}
 			spin_unlock_bh(&priv->bss_loss_lock);
-		} else if (unlikely(
+		}else
+#endif
+#ifdef CONFIG_ATBM_STA_LISTEN
+		if(priv->join_status == ATBM_APOLLO_JOIN_STATUS_STA_LISTEN){
+			if (ieee80211_is_auth(fctl)){
+				action = doJoin;
+			}else {
+				action = doTx;
+				txpriv->offchannel_if_id = ATBM_WIFI_GENERIC_IF_ID;
+			}
+		}else 
+#endif
+		if (unlikely(
 			(priv->join_status <= ATBM_APOLLO_JOIN_STATUS_MONITOR) ||
 			memcmp(frame->addr1, priv->join_bssid,
 				sizeof(priv->join_bssid)))) {
+#ifdef CONFIG_ATBM_SUPPORT_P2P
 #ifdef P2P_MULTIVIF
 			if (p2p_if_vif && (p2p_if_vif->join_status >
 				ATBM_APOLLO_JOIN_STATUS_MONITOR)
@@ -3753,8 +3815,9 @@ static bool wsm_handle_tx_data(struct atbm_vif *priv,
 				priv->join_status <= ATBM_APOLLO_JOIN_STATUS_MONITOR){
 				action = doTx;
 				txpriv->offchannel_if_id = ATBM_WIFI_GENERIC_IF_ID;
-				printk(KERN_DEBUG "%s:remain_on_channel tx fc(%x)\n",__func__,fctl);
+				atbm_printk_mgmt("%s:remain_on_channel tx fc(%x)\n",__func__,fctl);
 			}else
+#endif
 #endif
 			if (ieee80211_is_auth(fctl))
 				action = doJoin;
@@ -3771,8 +3834,7 @@ static bool wsm_handle_tx_data(struct atbm_vif *priv,
 					ATBM_APOLLO_JOIN_STATUS_MONITOR)
 				action = doTx;
 			else if (get_interface_id_scanning(hw_priv) != -1) {
-				wiphy_warn(priv->hw->wiphy,
-					"Scan ONGOING dropping offchannel"
+				atbm_printk_warn("Scan ONGOING dropping offchannel"
 					" eligible frame.\n");
 				action = doDrop;
 			}
@@ -3781,7 +3843,7 @@ static bool wsm_handle_tx_data(struct atbm_vif *priv,
 				*the current priv is not joined and in listenning mode,so we dont kown
 				*the channel.
 				*/
-				printk(KERN_ERR "%s:drop the off channel pkg(%x)\n",__func__,fctl);
+				atbm_printk_err("drop offchannel pkg(%x)\n",fctl);
 				action = doDrop;
 			}
 		}
@@ -3791,8 +3853,7 @@ static bool wsm_handle_tx_data(struct atbm_vif *priv,
 			action = doDrop;
 		else if (unlikely(!(BIT(txpriv->raw_link_id) &
 				(BIT(0) | priv->link_id_map)))) {
-			wiphy_warn(priv->hw->wiphy,
-					"A frame with expired link id "
+			atbm_printk_warn("A frame with expired link id "
 					"is dropped.\n");
 			action = doDrop;
 		}
@@ -3803,20 +3864,27 @@ static bool wsm_handle_tx_data(struct atbm_vif *priv,
 			 * drop and high power consumption of the driver.
 			 * In this situation it is better just to drop
 			 * the problematic frame. */
-			wiphy_warn(priv->hw->wiphy,
+			atbm_printk_warn(
 					"Too many attempts "
 					"to requeue a frame. "
 					"Frame is dropped.\n");
 			action = doDrop;
 		}
 		break;
+#ifdef CONFIG_ATBM_SUPPORT_IBSS
 	case NL80211_IFTYPE_ADHOC:
 		if (priv->join_status != ATBM_APOLLO_JOIN_STATUS_IBSS)
 			action = doDrop;
 		break;
+#endif
 	case NL80211_IFTYPE_MESH_POINT:
 		//STUB();
 	case NL80211_IFTYPE_MONITOR:
+		if(priv->join_status == ATBM_APOLLO_JOIN_STATUS_SIMPLE_MONITOR){
+			txpriv->offchannel_if_id = ATBM_WIFI_GENERIC_IF_ID;
+			action = doTx;
+			break;
+		}
 	default:
 		action = doDrop;
 		break;
@@ -3824,10 +3892,20 @@ static bool wsm_handle_tx_data(struct atbm_vif *priv,
 
 	if (action == doTx) {
 		if (unlikely(ieee80211_is_probe_req(fctl))) {
-			if(atomic_read(&hw_priv->scan.in_progress) || atomic_read(&hw_priv->remain_on_channel))
-                                action = doDrop;
-                        else
-                                action = doProbe;
+			if(atomic_read(&hw_priv->scan.in_progress) 
+#ifdef CONFIG_ATBM_SUPPORT_P2P
+				|| atomic_read(&hw_priv->remain_on_channel)
+#endif
+				)
+                action = doDrop;
+             else if(priv->join_status == ATBM_APOLLO_JOIN_STATUS_SIMPLE_MONITOR)
+             	action = doTx;
+#ifdef CONFIG_ATBM_STA_LISTEN
+			else if(priv->join_status == ATBM_APOLLO_JOIN_STATUS_STA_LISTEN)
+				action = doTx;
+#endif
+			else
+				action = doProbe;
 		} else if ((fctl & __cpu_to_le32(IEEE80211_FCTL_PROTECTED)) &&
 			tx_info->control.hw_key &&
 			unlikely(tx_info->control.hw_key->keyidx !=
@@ -3846,9 +3924,9 @@ static bool wsm_handle_tx_data(struct atbm_vif *priv,
 		 * probe responses.
 		 * The easiest way to get it back is to convert
 		 * probe request into WSM start_scan command. */
-		wsm_printk(KERN_DEBUG \
+		wsm_printk( \
 			"[WSM] Convert probe request to scan.\n");
-		printk(KERN_ERR "doProbe:[WSM] Convert probe request to scan.\n");
+		atbm_printk_mgmt( "doProbe:[WSM] Convert probe request to scan.\n");
 		wsm_lock_tx_async(hw_priv);
 		hw_priv->pending_frame_id = __le32_to_cpu(wsm->packetID);
 		if(atbm_hw_priv_queue_delayed_work(hw_priv,
@@ -3861,7 +3939,7 @@ static bool wsm_handle_tx_data(struct atbm_vif *priv,
 	{
 		/* See detailed description of "join" below.
 		 * We are dropping everything except AUTH in non-joined mode. */
-		wsm_printk(KERN_DEBUG "[WSM] Drop frame (0x%.4X).\n", fctl);
+		wsm_printk( "[WSM] Drop frame (0x%.4X).\n", fctl);
 #ifdef CONFIG_ATBM_APOLLO_TESTMODE
 		BUG_ON(atbm_queue_remove(hw_priv, queue,
 			__le32_to_cpu(wsm->packetID)));
@@ -3880,8 +3958,8 @@ static bool wsm_handle_tx_data(struct atbm_vif *priv,
 		 * but just a syncronization between AP and STA.
 		 * priv->join_status is used only in bh thread and does
 		 * not require protection */
-		wsm_printk(KERN_DEBUG "[WSM] Issue join command.\n");
-		printk(KERN_ERR "[WSM] Issue join command.\n");
+
+		atbm_printk_mgmt("[WSM] Issue join command.\n");
 		wsm_lock_tx_async(hw_priv);
 		hw_priv->pending_frame_id = __le32_to_cpu(wsm->packetID);
 		if (atbm_hw_priv_queue_work(hw_priv, &priv->join_work) <= 0)
@@ -3890,19 +3968,32 @@ static bool wsm_handle_tx_data(struct atbm_vif *priv,
 	}
 	break;
 	case doOffchannel:
+#ifdef CONFIG_ATBM_SUPPORT_P2P
 	{
-//		wsm_printk(KERN_DEBUG "[WSM] Offchannel TX request.\n");
-		printk(KERN_ERR "[WSM] Offchannel TX request.\n");
+		atbm_printk_mgmt("[WSM] Offchannel TX request.\n");
 		wsm_lock_tx_async(hw_priv);
 		hw_priv->pending_frame_id = __le32_to_cpu(wsm->packetID);
 		if (atbm_hw_priv_queue_work(hw_priv, &priv->offchannel_work) <= 0)
 			wsm_unlock_tx(hw_priv);
 		handled = true;
 	}
+#else
+	{
+#ifdef CONFIG_ATBM_APOLLO_TESTMODE
+		BUG_ON(atbm_queue_remove(hw_priv, queue,
+			__le32_to_cpu(wsm->packetID)));
+#else
+		BUG_ON(atbm_queue_remove(queue,
+			__le32_to_cpu(wsm->packetID)));
+#endif /*CONFIG_ATBM_APOLLO_TESTMODE*/
+		handled = true;
+	}
+#endif
 	break;
+
 	case doWep:
 	{
-		printk(KERN_ERR "[WSM] Issue set_default_wep_key.\n");
+		atbm_printk_mgmt("[WSM] Issue set_default_wep_key.\n");
 		wsm_lock_tx_async(hw_priv);
 		priv->wep_default_key_id = tx_info->control.hw_key->keyidx;
 		hw_priv->pending_frame_id = __le32_to_cpu(wsm->packetID);
@@ -3913,9 +4004,6 @@ static bool wsm_handle_tx_data(struct atbm_vif *priv,
 	break;
 	case doTx:
 	{
-#ifdef ATBM_SUPPORT_WIDTH_40M
-		static u8 send_40M=0;
-#endif
 #if 0
 		/* Kept for history. If you want to implement wsm->more,
 		 * make sure you are able to send a frame after that. */
@@ -3942,7 +4030,7 @@ static bool wsm_handle_tx_data(struct atbm_vif *priv,
 		if (ieee80211_is_deauth(fctl) &&
 				priv->mode != NL80211_IFTYPE_AP) {
 			/* Shedule unjoin work */
-			wsm_printk(KERN_DEBUG "[WSM] Issue unjoin command"
+			wsm_printk( "[WSM] Issue unjoin command"
 				" (TX).\n");
 #if 0
 			wsm->more = 0;
@@ -3953,11 +4041,12 @@ static bool wsm_handle_tx_data(struct atbm_vif *priv,
 				wsm_unlock_tx(hw_priv);
 		}
 #ifdef ATBM_SUPPORT_WIDTH_40M
+#ifdef CONFIG_ATBM_SUPPORT_P2P
 		/*
 		*ap and p2p can not suport 40M . so clear ht40 ie in some mgmt frame.
 		*/
 		if(
-			(priv->if_id != 0)
+			((priv->if_id != 0)&&(priv->vif->p2p==true))
 		  )
 		{
 			if(ieee80211_is_mgmt(frame->frame_control))
@@ -3966,41 +4055,47 @@ static bool wsm_handle_tx_data(struct atbm_vif *priv,
 			}
 				
 		}
+#endif
 		/*
 		*if the if_id is a p2p interface ,we do not use 40M.
 		*we must make sure 4way handshake transmit ok ,so send 20M width.
 		*/
-		wsm->htTxParameters &= ~WSM_HT_TX_WIDTH_40M;
+		wsm->htTxParameters &= ~(__cpu_to_le32(WSM_HT_TX_WIDTH_40M));
+
 		if(
-			atomic_read(&hw_priv->phy_chantype)	
-			&&
-			(priv->if_id == 0)// 
-			&&
-			(hw_priv->channel_type>=NL80211_CHAN_HT40MINUS)
-			
-		  )
-		{
-			struct sk_buff *skb = NULL;
-			const struct atbm_txpriv *temp_txpriv = NULL;
-			if (atbm_queue_get_skb(queue,wsm->packetID,
-						&skb, &temp_txpriv) == 0) 
-			{
-				if(skb->protocol != cpu_to_be16(ETH_P_PAE)) 
-				{
-					if(ieee80211_is_data(frame->frame_control)&&(wsm->maxTxRate>=14))
-					{
-						wsm->htTxParameters |= WSM_HT_TX_WIDTH_40M;
-						if(send_40M == 0)
-						{
-							printk("%s:WSM_HT_TX_WIDTH_40M\n",__func__);
-							send_40M = 1;
-						}
-					}
+			(priv->vif->p2p==false)&&
+			(ieee80211_chw_is_ht40(vif_chw(priv->vif)))
+		  ){
+			struct sta_info *sta = NULL;
+			rcu_read_lock();
+			sta = sta_info_get(vif_to_sdata(priv->vif), frame->addr1);
+			while (sta&&
+				test_sta_flag(sta,WLAN_STA_40M_CH)&&
+				(!test_sta_flag(sta,WLAN_STA_40M_CH_SEND_20M))){
+				const struct atbm_txpriv *temp_txpriv = NULL;
+				struct sk_buff *skb = NULL;
+
+				if(atbm_queue_get_skb(queue,wsm->packetID,
+						&skb, &temp_txpriv) != 0){
+					break;
 				}
+
+				if(skb->protocol == cpu_to_be16(ETH_P_PAE)){
+					break;
+				}
+
+				if(!ieee80211_is_data(frame->frame_control)){
+					break;
+				}
+				if(wsm->maxTxRate<14){
+					break;
+				}
+
+				wsm->htTxParameters |= __cpu_to_le32(WSM_HT_TX_WIDTH_40M);
+				break;
 			}
+			rcu_read_unlock();
 		}
-		else if(priv->if_id == 0)
-			send_40M = 0;
 #endif
 		if(wsm->htTxParameters&__cpu_to_le32(WSM_NEED_TX_CONFIRM))
 			hw_priv->hw_noconfirm_tx++;
@@ -4143,17 +4238,12 @@ int wsm_get_tx(struct atbm_common *hw_priv, u8 **data,
 	/* More is used only for broadcasts. */
 	bool more = false;
 #ifndef USB_CMD_UES_EP0
-
 	if (hw_priv->save_buf){
 		if(   /*the saved buff is a cmd ,so send direct*/
 			(hw_priv->save_buf_vif_selected == -1)||
 			/*tx_lock is not lock*/
 			(!(atomic_add_return(0, &hw_priv->tx_lock)
 			/*hmac is not in resetting state*/
-#ifdef RESET_CHANGE
-			||
-			atomic_read(&hw_priv->reset_flag)
-#endif
 			))
 		  )
 		{
@@ -4172,7 +4262,9 @@ int wsm_get_tx(struct atbm_common *hw_priv, u8 **data,
 		}
 	
 		return count;
-	}else if (hw_priv->wsm_cmd.ptr) {
+	}else
+#ifndef CONFIG_WSM_CMD_XMIT_DIRECTLY
+	if (hw_priv->wsm_cmd.ptr) {
 		++count;
 		spin_lock_bh(&hw_priv->wsm_cmd.lock);
 		BUG_ON(!hw_priv->wsm_cmd.ptr);
@@ -4186,7 +4278,8 @@ int wsm_get_tx(struct atbm_common *hw_priv, u8 **data,
 		*vif_selected = -1;
 		spin_unlock_bh(&hw_priv->wsm_cmd.lock);
 		return count;
-	} else 
+	} else
+#endif //CONFIG_WSM_CMD_XMIT_DIRECTLY
 #endif //USB_CMD_UES_EP0
 	{
 		for (;;) {
@@ -4243,14 +4336,7 @@ int wsm_get_tx(struct atbm_common *hw_priv, u8 **data,
 			 * enabled, so statement above will take case of that*/
 			if (
 				!atomic_read(&priv->enabled)
-#ifdef RESET_CHANGE
-				||
-				atomic_read(&hw_priv->reset_flag)
-#endif
 				) {
-#ifdef RESET_CHANGE
-				printk(KERN_DEBUG "%s:hw_priv->reset_flag(%d)---line(%d)\n",__func__,atomic_read(&hw_priv->reset_flag),__LINE__);
-#endif
 				atbm_priv_vif_list_read_unlock(&priv->vif_lock);
 				break;
 			}
@@ -4301,14 +4387,6 @@ int wsm_get_tx(struct atbm_common *hw_priv, u8 **data,
 				if_pending = 0;
 				continue;
 			}
-#ifdef RESET_CHANGE
-			if(atomic_read(&hw_priv->reset_flag))
-			{
-				printk("%s:hw_priv->reset_flag(%d)---line(%d)\n",__func__,atomic_read(&hw_priv->reset_flag),__LINE__);
-				atbm_priv_vif_list_read_unlock(&priv->vif_lock);
-				break;
-			}
-#endif
 			if (wsm_handle_tx_data(priv, wsm,
 					tx_info, txpriv, queue)) {
 				atbm_priv_vif_list_read_unlock(&priv->vif_lock);
@@ -4373,7 +4451,7 @@ int wsm_get_tx(struct atbm_common *hw_priv, u8 **data,
 					cpu_to_le16(IEEE80211_FCTL_MOREDATA);
 				}
 			}
-			wsm_printk(KERN_DEBUG "[WSM] >>> 0x%.4X (%d) %p %c\n",
+			wsm_printk( "[WSM] >>> 0x%.4X (%d) %p %c\n",
 				0x0004, *tx_len, *data,
 				wsm->more ? 'M' : ' ');
 			++count;
@@ -4608,6 +4686,7 @@ int wsm_set_chantype_func(struct atbm_common *hw_priv,
 
 	if (unlikely(arg->band > 1))
 		return -EINVAL;
+	wsm_oper_lock(hw_priv);
 	wsm_cmd_lock(hw_priv);
 	WSM_PUT8(buf, arg->band);
 	WSM_PUT8(buf, arg->flag);
@@ -4616,12 +4695,15 @@ int wsm_set_chantype_func(struct atbm_common *hw_priv,
 	ret = wsm_cmd_send(hw_priv, buf, NULL, WSM_SET_CHANTYPE_ID, WSM_CMD_TIMEOUT,
 			if_id);
 	wsm_cmd_unlock(hw_priv);
+	wsm_oper_unlock(hw_priv);
 	return ret;
 
 nomem:
 	wsm_cmd_unlock(hw_priv);
+	wsm_oper_unlock(hw_priv);
 	return -ENOMEM;
 }
+#ifdef CONFIG_ATBM_40M_AUTO_CCA
 int wsm_req_chtype_indication(struct atbm_common *hw_priv,
 					 struct wsm_buf *buf)
 {
@@ -4629,7 +4711,7 @@ int wsm_req_chtype_indication(struct atbm_common *hw_priv,
 
 	arg_ind.status = WSM_GET32(buf);
 
-	printk("%s:status(%d)\n",__func__,arg_ind.status);
+	atbm_printk_mgmt("%s:status(%d)\n",__func__,arg_ind.status);
 	return 0;
 underflow:
 	WARN_ON(1);
@@ -4641,7 +4723,6 @@ int wsm_req_chtype_change_func(struct atbm_common *hw_priv,
 	int ret;
 	struct wsm_buf *buf = &hw_priv->wsm_cmd_buf;
 
-	printk("%s\n",__func__);
 	wsm_cmd_lock(hw_priv);
 	WSM_PUT(buf,arg->MacAddr,6);
 	WSM_PUT16(buf, arg->flags);
@@ -4700,9 +4781,9 @@ underflow:
         WARN_ON(1);
         return -EINVAL;
 }
-
 #endif
-
+#endif
+#if 0
 int wsm_test_cmd(struct atbm_common *hw_priv,u8 *buffer,int size)
 {
 	int ret;
@@ -4720,6 +4801,7 @@ nomem:
 	wsm_cmd_unlock(hw_priv);
 	return -ENOMEM;
 }
+#endif
 /*
 	@name: wsm_efuse_change_data_cmd
 	@param: arg		efuse data

@@ -96,7 +96,9 @@ struct ieee80211_key {
 			 */
 			u8 rx_pn[NUM_RX_DATA_QUEUES + 1][CCMP_PN_LEN];
 			u8 prev_rx_pn[NUM_RX_DATA_QUEUES + 1][6];
+#ifdef CONFIG_ATBM_USE_SW_ENC
 			struct crypto_cipher *tfm;
+#endif
 			u32 replays; /* dot11RSNAStatsCCMPReplays */
 		} ccmp;
 		struct {
@@ -129,7 +131,6 @@ struct ieee80211_key {
 	 */
 	struct ieee80211_key_conf conf;
 };
-
 struct ieee80211_key *ieee80211_key_alloc(u32 cipher, int idx, size_t key_len,
 					  const u8 *key_data,
 					  size_t seq_len, const u8 *seq);
@@ -150,7 +151,6 @@ void ieee80211_set_default_mgmt_key(struct ieee80211_sub_if_data *sdata,
 void ieee80211_free_keys(struct ieee80211_sub_if_data *sdata);
 void ieee80211_enable_keys(struct ieee80211_sub_if_data *sdata);
 void ieee80211_disable_keys(struct ieee80211_sub_if_data *sdata);
-
 #define key_mtx_dereference(local, ref) \
 	rcu_dereference_protected(ref, lockdep_is_held(&((local)->key_mtx)))
 

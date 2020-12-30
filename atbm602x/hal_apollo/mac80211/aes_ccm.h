@@ -9,7 +9,7 @@
 
 #ifndef AES_CCM_H
 #define AES_CCM_H
-
+#ifdef CONFIG_ATBM_USE_SW_ENC
 #include <linux/crypto.h>
 
 struct crypto_cipher *ieee80211_aes_key_setup_encrypt(const u8 key[]);
@@ -20,5 +20,5 @@ int ieee80211_aes_ccm_decrypt(struct crypto_cipher *tfm, u8 *scratch,
 			      u8 *cdata, size_t data_len,
 			      u8 *mic, u8 *data);
 void ieee80211_aes_key_free(struct crypto_cipher *tfm);
-
+#endif
 #endif /* AES_CCM_H */

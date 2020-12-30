@@ -130,6 +130,9 @@ struct atbm_common;
 #define WSM_SCAN_MAX_NUM_OF_CHANNELS	(14)
 #define WSM_FLAG_START_SMARTCONFIG    BIT(5)
 
+#define WSM_FLAG_BEST_CHANNEL_START		BIT(6)
+#define WSM_FLAG_BEST_CHANNEL_END		(~(BIT(6)))
+
 /* The maximum number of SSIDs that the device can scan for. */
 #define WSM_SCAN_MAX_NUM_OF_SSIDS	(2)
 #ifdef CONFIG_ATBM_APOLLO_TESTMODE
@@ -186,6 +189,7 @@ struct atbm_common;
 #define WSM_HT_TX_WIDTH_40M			(BIT(3))
 
 #endif
+#define WSM_HT_TX_USE_MINRATE		(BIT(4))
 /* STBC allowed */
 #define WSM_HT_TX_STBC			(BIT(7))
 #define WSM_NEED_TX_CONFIRM		(BIT(8))
@@ -303,6 +307,7 @@ struct atbm_common;
 /* Macro to fetch encryption key index. */
 #define WSM_RX_STATUS_KEY_IDX(status)	(((status >> 20)) & 0x0F)
 #define WSM_RX_STATUS_SHORT_GI      (BIT(24))
+#define WSM_RX_STATUS_FILTER_FRAME	(BIT(29))
 
 /* Frame Control field starts at Frame offset + 2 */
 #define WSM_TX_2BYTES_SHIFT		(BIT(7))
@@ -360,9 +365,7 @@ struct atbm_common;
 #define WSM_START_MODE_AP		(0)	/* Mini AP */
 #define WSM_START_MODE_P2P_GO		(1)	/* P2P GO */
 #define WSM_START_MODE_P2P_DEV		(2)	/* P2P device */
-#ifdef ATBM_SUPPORT_PKG_MONITOR
 #define WSM_START_MODE_MONITOR_DEV	(3)
-#endif
 
 /* SetAssociationMode MIB flags */
 #define WSM_ASSOCIATION_MODE_USE_PREAMBLE_TYPE		(BIT(0))
@@ -582,8 +585,21 @@ struct atbm_common;
 #define WSM_MIB_ID_GET_ETF_RX_STATS			0x103f
 #define WSM_MIB_ID_SET_EFUSE_DATA_ZHUANG	0x1040
 #define WSM_MIB_ID_SMARTCONFIG_START		0x1041
+#define WSM_MIB_ID_GET_EFUSE_CUR_STATUS		0x1042
+#define WSM_MIB_ID_SET_DUTY_RATIO			0x1043
+#define WSM_MIB_ID_GET_EFUSE_LAST_MAC		0x1044
+#define WSM_MIB_ID_GET_EFUSE_FIRST_MAC		0x1045
+
+
 #define WSM_MIB_ID_GET_RATE					0x1050
 
+#define WSM_MIB_ID_GET_SIGMSTAR_256BITSEFUSE  0x1051
+#define WSM_MIB_ID_SET_SIGMSTAR_256BITSEFUSE  0x1052
+
+#define WSM_MIB_ID_GET_CHANNEL_IDLE			0x1053
+#define WSM_MIB_ID_CHANNEL_TEST_START		0x1054
+
+#define WSM_MIB_ID_GET_MONITOR_MAC_STATUS	0x1055
 //#define WSM_START_FIND_ID                 0x0019 //used by efuse change data
 //#define WSM_START_FIND_RESP_ID            0x0419 //used by efuse change data
 #define WSM_STOP_FIND_ID					 0x001A
@@ -614,6 +630,8 @@ struct atbm_common;
 #define WSM_DEBUG_PRINT_IND_ID				0x0810
 #define WSM_MULTI_RECEIVE_INDICATION_ID		 0x0811
 #define WSM_SMARTCONFIG_INDICATION_ID		 0x0812
+#define WSM_SINGLE_CHANNEL_MULTI_RECEIVE_INDICATION_ID	 0x0813
+
 
 /* Frame template types */
 #define WSM_FRAME_TYPE_PROBE_REQUEST	(0)
@@ -753,6 +771,9 @@ struct wsm_caps {
 	u32 HiHwCnfBufaddr;
 	int firmwareReady;
 	u32 exceptionaddr;
+	u16 NumOfInterfaces;
+	u16 NumOfStations;
+	u32 NumOfHwXmitedAddr;
 };
 
 /* ******************************************************************** */
@@ -835,9 +856,14 @@ struct wsm_scan_complete {
 
 	/* Number of channels that the scan operation completed. */
 	u8 numChannels;
+
+	/* Duty Ratio for per channel */
+	u8 busy_ratio[14];
+#ifdef CONFIG_ATBM_SUPPORT_SCHED_SCAN	
 #ifdef ROAM_OFFLOAD
 	u16 reserved;
 #endif /*ROAM_OFFLOAD*/
+#endif
 };
 
 typedef void (*wsm_scan_complete_cb) (struct atbm_common *hw_priv,
@@ -1613,6 +1639,16 @@ static inline int wsm_set_efuse_data(struct atbm_common *hw_priv, u8 *efuse, int
 	return wsm_write_mib(hw_priv, WSM_MIB_ID_SET_EFUSE_DATA_ZHUANG, efuse,
 			    len,-1);
 }
+static inline int wsm_get_SIGMSTAR_256BITSEFUSE(struct atbm_common *hw_priv, u8 *efuse, int len)
+{
+	return wsm_read_mib(hw_priv, WSM_MIB_ID_GET_SIGMSTAR_256BITSEFUSE, efuse,
+			    len,-1);
+}
+static inline int wsm_set_SIGMSTAR_256BITSEFUSE(struct atbm_common *hw_priv, u8 *efuse, int len)
+{
+	return wsm_write_mib(hw_priv, WSM_MIB_ID_SET_SIGMSTAR_256BITSEFUSE, efuse,
+			    len,-1);
+}
 
 struct efuse_headr{
 	u8 specific;
@@ -1643,6 +1679,24 @@ static inline int wsm_get_efuse_data(struct atbm_common *hw_priv, void *efuse, i
 			    len,-1);
 }
 
+static inline int wsm_get_efuse_remain_bit(struct atbm_common *hw_priv, void *remainBit, int len)
+{
+	return wsm_read_mib(hw_priv, WSM_MIB_ID_GET_EFUSE_CUR_STATUS, remainBit,
+				len, -1);
+}
+
+static inline int wsm_get_efuse_last_mac(struct atbm_common *hw_priv, u8 *mac)
+{
+	return wsm_read_mib(hw_priv, WSM_MIB_ID_GET_EFUSE_LAST_MAC, mac,
+				ETH_ALEN, -1);
+}
+
+static inline int wsm_get_efuse_first_mac(struct atbm_common *hw_priv, u8 *mac)
+{
+	return wsm_read_mib(hw_priv, WSM_MIB_ID_GET_EFUSE_FIRST_MAC, mac,
+				ETH_ALEN, -1);
+}
+
 struct wsm_rx_filter {
 	bool promiscuous;
 	bool bssid;
@@ -1671,11 +1725,16 @@ static inline int wsm_set_rx_filter(struct atbm_common *hw_priv,
 }
 
 int wsm_set_probe_responder(struct atbm_vif *priv, bool enable);
+#ifdef ATBM_SUPPORT_WOW
 int wsm_set_keepalive_filter(struct atbm_vif *priv, bool enable);
+#endif
 
-#define WSM_BEACON_FILTER_IE_HAS_CHANGED	BIT(0)
+#define WSM_BEACON_FILTER_IE_HAS_CHANGED		BIT(0)
 #define WSM_BEACON_FILTER_IE_NO_LONGER_PRESENT	BIT(1)
-#define WSM_BEACON_FILTER_IE_HAS_APPEARED	BIT(2)
+#define WSM_BEACON_FILTER_IE_HAS_APPEARED		BIT(2)
+#define WSM_BEACON_FILTER_FRAME_TYPE			BIT(3)
+#define WSM_BEACON_FILTER_ACTION_ENABLE			BIT(4)
+#define WSM_BEACON_FILTER_OUI					BIT(5)
 
 struct wsm_beacon_filter_table_entry {
 	u8	ieId;
@@ -1686,7 +1745,7 @@ struct wsm_beacon_filter_table_entry {
 
 struct wsm_beacon_filter_table {
 	__le32 numOfIEs;
-	struct wsm_beacon_filter_table_entry entry[10];
+	struct wsm_beacon_filter_table_entry entry[16];
 } __packed;
 
 static inline int wsm_set_beacon_filter_table(struct atbm_common *hw_priv,
@@ -1840,7 +1899,7 @@ static inline int wsm_set_block_ack_policy(struct atbm_common *hw_priv,
 	};
 	//printk("blockAckTxTidPolicy=%0x\n",blockAckTxTidPolicy);
 	//printk("blockAckRxTidPolicy=%0x\n",blockAckRxTidPolicy);
-	printk(KERN_DEBUG "%s:blockAckTxTidPolicy(%x),blockAckRxTidPolicy(%x),if_id(%d)\n",__func__,
+	atbm_printk_mgmt("%s:blockAckTxTidPolicy(%x),blockAckRxTidPolicy(%x),if_id(%d)\n",__func__,
 	blockAckTxTidPolicy,blockAckRxTidPolicy,if_id);
 	return wsm_write_mib(hw_priv, WSM_MIB_ID_BLOCK_ACK_POLICY, &val,
 			     sizeof(val), if_id);
@@ -1861,6 +1920,7 @@ static inline int wsm_set_association_mode(struct atbm_common *hw_priv,
 	return wsm_write_mib(hw_priv, WSM_MIB_ID_SET_ASSOCIATION_MODE, arg,
 			     sizeof(*arg), if_id);
 }
+#ifndef CONFIG_RATE_HW_CONTROL
 #define WSM_TX_RATE_POLICY_FLAG_TERMINATE_WHEN_FINISHED BIT(2)
 #define WSM_TX_RATE_POLICY_FLAG_COUNT_INITIAL_TRANSMIT BIT(3)
 struct wsm_set_tx_rate_retry_policy_header {
@@ -1878,6 +1938,7 @@ struct wsm_set_tx_rate_retry_policy_policy {
 	__le32 rateCountIndices[3];
 } __packed;
 
+
 struct wsm_set_tx_rate_retry_policy {
 	struct wsm_set_tx_rate_retry_policy_header hdr;
 	struct wsm_set_tx_rate_retry_policy_policy tbl[8];
@@ -1893,7 +1954,8 @@ static inline int wsm_set_tx_rate_retry_policy(struct atbm_common *hw_priv,
 	return wsm_write_mib(hw_priv, WSM_MIB_ID_SET_TX_RATE_RETRY_POLICY, arg,
 			     size, if_id);
 }
-
+#endif
+#ifdef ATBM_SUPPORT_WOW
 /* 4.32 SetEtherTypeDataFrameFilter */
 struct wsm_ether_type_filter_hdr {
 	u8 nrFilters;		/* Up to WSM_MAX_FILTER_ELEMENTS */
@@ -1938,7 +2000,7 @@ static inline int wsm_set_udp_port_filter(struct atbm_common *hw_priv,
 	return wsm_write_mib(hw_priv, WSM_MIB_ID_SET_UDPPORT_DATAFRAME_FILTER,
 		arg, size, if_id);
 }
-
+#endif
 /* Undocumented MIBs: */
 /* 4.35 P2PDeviceInfo */
 #define D11_MAX_SSID_LEN		(32)
@@ -2074,7 +2136,6 @@ static inline int wsm_set_multicast_filter(struct atbm_common *hw_priv,
 	return wsm_write_mib(hw_priv, WSM_MIB_ID_DOT11_GROUP_ADDRESSES_TABLE,
 			     fp, sizeof(*fp), if_id);
 }
-
 /* ARP IPv4 filtering - 4.10 */
 struct wsm_arp_ipv4_filter {
 	__le32 enable;
@@ -2103,7 +2164,7 @@ struct wsm_ipv6_filter {
 	struct wsm_ip6_addr_info ipv6filter[0];
 } __packed;
 #endif /*IPV6_FILTERING*/
-
+#ifdef CONFIG_ATBM_LMAC_FILTER_IP_FRAME
 static inline int wsm_set_arp_ipv4_filter(struct atbm_common *hw_priv,
 					  struct wsm_arp_ipv4_filter *fp,
 					  int if_id)
@@ -2121,7 +2182,7 @@ static inline int wsm_set_ndp_ipv6_filter(struct atbm_common *priv,
 			    fp, sizeof(*fp), if_id);
 }
 #endif /*IPV6_FILTERING*/
-
+#endif
 /* P2P Power Save Mode Info - 4.31 */
 struct wsm_p2p_ps_modeinfo {
 	u8	oppPsCTWindow;
@@ -2132,7 +2193,7 @@ struct wsm_p2p_ps_modeinfo {
 	__le32	interval;
 	__le32	startTime;
 } __packed;
-
+#ifdef CONFIG_ATBM_SUPPORT_P2P
 static inline int wsm_set_p2p_ps_modeinfo(struct atbm_common *hw_priv,
 					  struct wsm_p2p_ps_modeinfo *mi,
 					  int if_id)
@@ -2147,7 +2208,7 @@ static inline int wsm_get_p2p_ps_modeinfo(struct atbm_common *hw_priv,
 	return wsm_read_mib(hw_priv, WSM_MIB_ID_P2P_PS_MODE_INFO,
 			    mi, sizeof(*mi),if_id);
 }
-
+#endif
 /* UseMultiTxConfMessage */
 
 static inline int wsm_use_multi_tx_conf(struct atbm_common *hw_priv,
@@ -2292,6 +2353,7 @@ static inline u8 wsm_queue_id_to_wsm(u8 queueId)
 	};
 	return queue_mapping[queueId];
 }
+
 int wsm_read_shmem(struct atbm_common *hw_priv, u32 address, void *buffer, size_t buf_size);
 int wsm_write_shmem(struct atbm_common *hw_priv, u32 address,size_t size, void *buffer);
 #ifdef OPER_CLOCK_USE_SEM
@@ -2314,7 +2376,6 @@ void atbm_pm_timer(unsigned long arg);
 #define WSM_SET_CHANTYPE_FLAGS__ETF_GREEDFILED		(6)
 #define WSM_SET_CHANTYPE_FLAGS__ETF_TEST_START		(7)
 #define WSM_SET_CHANTYPE_PRB_TPC					(5)
-//see doc /* ´ø¿íÑ¡ÔñËã·¨.doc*/
 struct wsm_set_chantype
 {
 	u8		band;			//0:2.4G,1:5G
@@ -2356,6 +2417,7 @@ struct wsm_req_chtype_change_ind
 #define WSM_SEND_CHTYPE_CHG_REQUEST_IND_ID		(0x825)
 int wsm_set_chantype_func(struct atbm_common *hw_priv,
 				    struct wsm_set_chantype *arg,int if_id);
+#ifdef CONFIG_ATBM_40M_AUTO_CCA
 int wsm_get_cca(struct atbm_common *hw_priv,struct wsm_get_cca_req *arg,
 				struct wsm_get_cca_resp *cca_res,
 				int if_id);
@@ -2365,6 +2427,7 @@ extern int wsm_req_chtype_change_func(struct atbm_common *hw_priv,
 											struct wsm_req_chtype_change *arg,int if_id);
 int wsm_req_chtype_indication(struct atbm_common *hw_priv,
 					 struct wsm_buf *buf);
+#endif
 void wsm_sync_channl_reset(struct work_struct *work);
 int  sdio_sync_channle_process(struct atbm_common *hw_priv);
 #endif
@@ -2401,6 +2464,7 @@ static inline int ALINE_BYTE(int len,int offset){
 
 #define RECOVERY_STEP1_SUCCESS 1
 #define RECOVERY_STEP2_SUCCESS 2
+#define RECOVERY_BH_HALT	   3
 #define RECOVERY_ERR 			-1
 typedef enum{
 	OUT_BH=1,

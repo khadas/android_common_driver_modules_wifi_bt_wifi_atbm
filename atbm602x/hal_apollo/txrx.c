@@ -12,13 +12,15 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
-
+#include <linux/version.h>
+#include <linux/module.h>
+#include <linux/kernel.h>
 #include <net/atbm_mac80211.h>
 #include <linux/etherdevice.h>
 #include <linux/skbuff.h>
 #include <linux/udp.h>
 #include <net/ip.h>
-
+#include <linux/bitops.h>
 #include "apollo.h"
 #include "wsm.h"
 #include "bh.h"
@@ -31,7 +33,7 @@
 
 
 #if defined(CONFIG_ATBM_APOLLO_TX_POLICY_DEBUG)
-#define tx_policy_printk(...) printk(__VA_ARGS__)
+#define tx_policy_printk(...) atbm_printk_always(__VA_ARGS__)
 #else
 #define tx_policy_printk(...)
 #endif
@@ -52,29 +54,33 @@ static u8 broadcast_addr[6] = {0x01,0x00,0x02,0x03,0x04,0xff};
 #define IS_BOOTP_PORT(src_port,des_port) ((((src_port) == 67)&&((des_port) == 68)) || \
 										   (((src_port) == 68)&&((des_port) == 67)))
 
-
-
 #if 1
-
+#if 0
 void dhcp_hexdump(char *prefix, u8 *data, int len)
 {
 	int i;
 
 	for (i = 0; i < len; i++) {
 	   if((i % 16)==0)
-		   printk("\n");
-	   printk("%02x ", data[i]);
+		   atbm_printk_always("\n");
+	   atbm_printk_always("%02x ", data[i]);
 
 	}
-	printk("\n");
+	atbm_printk_always("\n");
 }
-
+#endif
 //extern int g_connetting;
 static int tx_dhcp_retry_cnt=0;
 
 
-void atbm_tx_udp(struct atbm_vif *priv,struct sk_buff *skb)
+void atbm_tx_udp(struct ieee80211_hw *dev,struct sk_buff *skb)
 {
+	struct ieee80211_tx_info *tx_info = IEEE80211_SKB_CB(skb);
+	struct atbm_vif *priv = ABwifi_get_vif_from_ieee80211(tx_info->control.vif);
+	
+	if(priv == NULL){
+		return;
+	}
 	//struct ieee80211_hdr *frame = (struct ieee80211_hdr *)skb->data;
 	if (atomic_read(&priv->enabled) == 0)
 		return;
@@ -104,14 +110,13 @@ void atbm_tx_udp(struct atbm_vif *priv,struct sk_buff *skb)
 			if(SDATA_IS_CONNECTTING(vif_to_sdata(priv->vif))){
 			    priv->dhcp_retry_skb = atbm_skb_copy(skb, GFP_ATOMIC);
 				if(priv->dhcp_retry_skb == NULL){
-					printk(KERN_ERR"%s:no mem\n",__func__);
 					spin_unlock_bh(&priv->dhcp_retry_spinlock);
 					return;
 				}
 				atbm_hw_priv_queue_delayed_work(priv->hw_priv,&priv->dhcp_retry_work, HZ/2);
 				//memcpy(priv->dhcp_retry_skb->data,skb->data,skb->len);
 				memcpy(IEEE80211_SKB_CB(priv->dhcp_retry_skb),IEEE80211_SKB_CB(skb),sizeof(struct ieee80211_tx_info));
-				printk("start atbm_hw_priv_queue_delayed_work\n");
+				atbm_printk_rx("start atbm_hw_priv_queue_delayed_work\n");
 			}
 			else {
 				atbm_cancle_delayed_work(&priv->dhcp_retry_work,false);
@@ -123,7 +128,7 @@ void atbm_tx_udp(struct atbm_vif *priv,struct sk_buff *skb)
 	}
 }
 
-
+#if 0
 int atbm_is_dhcp_frame(struct atbm_vif *priv,struct sk_buff *skb)
 {
 	//struct ieee80211_hdr *frame = (struct ieee80211_hdr *)skb->data;
@@ -141,7 +146,7 @@ int atbm_is_dhcp_frame(struct atbm_vif *priv,struct sk_buff *skb)
 
 	return 0;
 }
-
+#endif
 #else
 void atbm_tx_udp(struct sk_buff *skb)
 {
@@ -213,7 +218,7 @@ void atbm_rx_udp(struct atbm_vif *priv,struct sk_buff *skb)
 			struct udphdr *udph=(struct udphdr *)((u8*)ip+(ip->ihl<<2));
 			if(IS_BOOTP_PORT(ntohs(udph->source),ntohs(udph->dest)))
 			{
-				printk("cancel dhcp_retry_work\n");
+				atbm_printk_rx("cancel dhcp_retry_work\n");
 				atbm_cancle_delayed_work(&priv->dhcp_retry_work,false);
 				
 				//dhcp_hexdump("Rx Dhcp ",(u8*)udph+236+8,16);
@@ -234,7 +239,7 @@ void atbm_dhcp_retry_work(struct work_struct *work)
 	if(atbm_bh_is_term(hw_priv)){
 		return;
 	}
-	printk("atbm_dhcp_retry_work priv->dhcp_retry_skb %p %d\n",priv->dhcp_retry_skb,SDATA_IS_CONNECTTING(vif_to_sdata(priv->vif)));
+	atbm_printk_tx("atbm_dhcp_retry_work priv->dhcp_retry_skb %p %d\n",priv->dhcp_retry_skb,SDATA_IS_CONNECTTING(vif_to_sdata(priv->vif)));
 	spin_lock_bh(&priv->dhcp_retry_spinlock);
 	if((priv->dhcp_retry_skb != NULL) &&(SDATA_IS_CONNECTTING(vif_to_sdata(priv->vif)))){
 		//skb = priv->dhcp_retry_skb;
@@ -242,7 +247,6 @@ void atbm_dhcp_retry_work(struct work_struct *work)
 		
 		skb = atbm_skb_copy(priv->dhcp_retry_skb , GFP_ATOMIC);
 		if(skb == NULL){
-			printk(KERN_ERR "%s:no mem\n",__func__);
 			spin_unlock_bh(&priv->dhcp_retry_spinlock);
 			atbm_hw_priv_queue_delayed_work(priv->hw_priv,&priv->dhcp_retry_work, HZ/50);
 			return;
@@ -250,13 +254,13 @@ void atbm_dhcp_retry_work(struct work_struct *work)
 		memcpy(IEEE80211_SKB_CB(skb),IEEE80211_SKB_CB(priv->dhcp_retry_skb),sizeof(struct ieee80211_tx_info));
 						
 		spin_unlock_bh(&priv->dhcp_retry_spinlock);
-		printk("atbm_dhcp_retry_work __atbm_tx\n");
+		atbm_printk_tx("atbm_dhcp_retry_work __atbm_tx\n");
 		local_bh_disable();
 		__atbm_tx(priv->hw,skb);
 		local_bh_enable();
 		spin_lock_bh(&priv->dhcp_retry_spinlock);
 		tx_dhcp_retry_cnt++;
-		printk("restart dhcp_retry_work %d\n",tx_dhcp_retry_cnt);
+		atbm_printk_tx("restart dhcp_retry_work %d\n",tx_dhcp_retry_cnt);
 		if(tx_dhcp_retry_cnt <3){
 			atbm_hw_priv_queue_delayed_work(priv->hw_priv,&priv->dhcp_retry_work, HZ/2);
 		}
@@ -271,10 +275,10 @@ void atbm_dhcp_retry_work(struct work_struct *work)
 	}
 	spin_unlock_bh(&priv->dhcp_retry_spinlock);
 }
-
+#ifndef CONFIG_RATE_HW_CONTROL
 static void tx_policy_dump(struct tx_policy *policy)
 {
-	tx_policy_printk(KERN_DEBUG "[TX policy] "
+	tx_policy_printk( "[TX policy] "
 		"%.1X%.1X%.1X%.1X%.1X%.1X%.1X%.1X"
 		"%.1X%.1X%.1X%.1X%.1X%.1X%.1X%.1X"
 		"%.1X%.1X%.1X%.1X%.1X%.1X%.1X%.1X: %d\n",
@@ -292,7 +296,8 @@ static void tx_policy_dump(struct tx_policy *policy)
 		policy->raw[11] & 0x0F,  policy->raw[11] >> 4,
 		policy->defined);
 }
-
+#endif
+#ifdef CONFIG_ATBM_SUPPORT_P2P
 static void atbm_check_go_neg_conf_success(struct atbm_common *hw_priv,
 						u8 *action)
 {
@@ -315,7 +320,8 @@ static void atbm_check_prov_desc_req(struct atbm_common *hw_priv,
                         hw_priv->is_go_thru_go_neg = false;
         }
 }
-
+#endif
+#ifndef CONFIG_RATE_HW_CONTROL
 static void tx_policy_build(const struct atbm_common *hw_priv,
 	/* [out] */ struct tx_policy *policy,
 	struct ieee80211_tx_rate *rates, size_t count)
@@ -439,7 +445,7 @@ static void tx_policy_build(const struct atbm_common *hw_priv,
 		policy->retry_count += retries;
 	}
 
-	tx_policy_printk(KERN_DEBUG "[TX policy] Policy (%d): " \
+	tx_policy_printk( "[TX policy] Policy (%d): " \
 		"%d:%d, %d:%d, %d:%d, %d:%d, %d:%d\n",
 		count,
 		rates[0].idx, rates[0].count,
@@ -501,7 +507,6 @@ static inline int tx_policy_release(struct tx_policy_cache *cache,
 		list_move(&entry->link, &cache->free);
 	return ret;
 }
-
 /* ******************************************************************** */
 /* External TX policy cache API						*/
 
@@ -519,7 +524,6 @@ void tx_policy_init(struct atbm_common *hw_priv)
 	for (i = 0; i < TX_POLICY_CACHE_SIZE; ++i)
 		list_add(&cache->cache[i].link, &cache->free);
 }
-
 static int tx_policy_get(struct atbm_common *hw_priv,
 		  struct ieee80211_tx_rate *rates,
 		  size_t count, bool *renew)
@@ -534,7 +538,7 @@ static int tx_policy_get(struct atbm_common *hw_priv,
 	
 	idx = tx_policy_find(cache, &wanted);
 	if (idx >= 0) {
-		tx_policy_printk(KERN_DEBUG "[TX policy] Used TX policy: %d\n",
+		tx_policy_printk( "[TX policy] Used TX policy: %d\n",
 					idx);
 		*renew = false;
 	}
@@ -550,7 +554,7 @@ static int tx_policy_get(struct atbm_common *hw_priv,
 			struct tx_policy_cache_entry, link);
 		entry->policy = wanted;
 		idx = entry - cache->cache;
-		tx_policy_printk(KERN_DEBUG "[TX policy] New TX policy: %d\n",
+		tx_policy_printk( "[TX policy] New TX policy: %d\n",
 					idx);
 		tx_policy_dump(&entry->policy);
 	}
@@ -563,9 +567,9 @@ static int tx_policy_get(struct atbm_common *hw_priv,
 
 	return idx;
 }
-
 static void tx_policy_put(struct atbm_common *hw_priv, int idx)
 {
+
 	int usage, locked;
 	struct tx_policy_cache *cache = &hw_priv->tx_policy_cache;
 
@@ -578,25 +582,6 @@ static void tx_policy_put(struct atbm_common *hw_priv, int idx)
 	}
 	spin_unlock_bh(&cache->lock);
 }
-
-#ifdef RESET_CHANGE
-void tx_policy_put_reset(struct atbm_common *hw_priv)
-{
-	int i;
-	struct tx_policy_cache *cache = &hw_priv->tx_policy_cache;
-	spin_lock_bh(&cache->lock);
-	memset(&cache->used,0,sizeof(struct list_head));
-	memset(&cache->free,0,sizeof(struct list_head));
-	memset(cache->cache,0,sizeof(struct tx_policy_cache_entry)*TX_POLICY_CACHE_SIZE);
-	INIT_LIST_HEAD(&cache->used);
-	INIT_LIST_HEAD(&cache->free);
-	for (i = 0; i < TX_POLICY_CACHE_SIZE; ++i)
-	{
-		list_add(&cache->cache[i].link, &cache->free);
-	}
-	spin_unlock_bh(&cache->lock);
-}
-#endif
 /*
 bool tx_policy_cache_full(struct atbm_common *hw_priv)
 {
@@ -647,7 +632,7 @@ static int tx_policy_upload(struct atbm_common *hw_priv)
 	}
 	spin_unlock_bh(&cache->lock);
 	atbm_debug_tx_cache_miss(hw_priv);
-	tx_policy_printk(KERN_DEBUG "[TX policy] Upload %d policies\n",
+	tx_policy_printk( "[TX policy] Upload %d policies\n",
 				arg.hdr.numTxRatePolicies);
 	/*TODO: COMBO*/
 	return wsm_set_tx_rate_retry_policy(hw_priv, &arg, if_id);
@@ -658,7 +643,7 @@ void tx_policy_upload_work(struct work_struct *work)
 		container_of(work, struct atbm_common, tx_policy_upload_work);
 	if(atbm_bh_is_term(hw_priv))
 		goto out;
-	tx_policy_printk(KERN_DEBUG "[TX] TX policy upload\n");
+	tx_policy_printk( "[TX] TX policy upload\n");
 	if(tx_policy_upload(hw_priv)){
 		if(!atbm_bh_is_term(hw_priv)){
 			WARN_ON(1);
@@ -668,7 +653,7 @@ out:
 	wsm_unlock_tx(hw_priv);
 	atbm_tx_queues_unlock(hw_priv);
 }
-
+#endif
 /* ******************************************************************** */
 /* apollo TX implementation						*/
 
@@ -725,6 +710,8 @@ static int
 atbm_tx_h_calc_link_ids(struct atbm_vif *priv,
 			  struct atbm_txinfo *t)
 {
+	bool timestamp_update = true;
+#ifdef CONFIG_ATBM_SUPPORT_P2P
 #ifndef P2P_MULTIVIF
 	struct atbm_common *hw_priv = ABwifi_vifpriv_to_hwpriv(priv);
 	if ((t->tx_info->flags & IEEE80211_TX_CTL_TX_OFFCHAN) ||
@@ -733,8 +720,18 @@ atbm_tx_h_calc_link_ids(struct atbm_vif *priv,
 	else
 		t->txpriv.offchannel_if_id = 0;
 #endif
-
-	if (likely(t->tx_info->control.sta && t->sta_priv->link_id))
+#endif
+#ifdef CONFIG_ATBM_STA_LISTEN
+	if(priv->join_status == ATBM_APOLLO_JOIN_STATUS_STA_LISTEN){
+		t->txpriv.raw_link_id = 0;
+		t->txpriv.link_id = 0;
+	}else
+#endif
+	if(priv->join_status == ATBM_APOLLO_JOIN_STATUS_SIMPLE_MONITOR){
+		t->txpriv.raw_link_id = 0;
+		t->txpriv.link_id = 0;
+	}
+	else if (likely(t->tx_info->control.sta && t->sta_priv->link_id))
 		t->txpriv.raw_link_id =
 				t->txpriv.link_id =
 				t->sta_priv->link_id;
@@ -756,21 +753,23 @@ atbm_tx_h_calc_link_ids(struct atbm_vif *priv,
 		transmitted to an unassociated STA */
 		if (!(t->txpriv.link_id) &&
 			(ieee80211_is_deauth(t->hdr->frame_control) ||
-			ieee80211_is_disassoc(t->hdr->frame_control))) {
-					t->txpriv.link_id = 0;
+			ieee80211_is_disassoc(t->hdr->frame_control) ||
+			ieee80211_is_probe_resp(t->hdr->frame_control) ||
+			ieee80211_is_action(t->hdr->frame_control))) {
+			t->txpriv.link_id = 0;
+			atbm_printk_debug("%s:send no id\n",__func__);
 		} else {
 			if (!t->txpriv.link_id)
 				t->txpriv.link_id = atbm_alloc_link_id(priv, t->da);
 			if (!t->txpriv.link_id) {
-				wiphy_err(priv->hw->wiphy,
-					"%s: No more link IDs available.\n",
-					__func__);
+				atbm_printk_err("No more link IDs available.\n");
 				return -ENOENT;
 			}
 		}
 		t->txpriv.raw_link_id = t->txpriv.link_id;
+		timestamp_update = false;
 	}
-	if (t->txpriv.raw_link_id)
+	if ((t->txpriv.raw_link_id) && (timestamp_update == true))
 		priv->link_id_db[t->txpriv.raw_link_id - 1].timestamp =
 				jiffies;
 
@@ -814,14 +813,13 @@ atbm_tx_h_crypt(struct atbm_vif *priv,
 {
 	u32 iv_len;
 	u32 icv_len;
-	u8 *icv;
 	u8 *newhdr;	
 	struct ieee80211_mmie *mmie;
 #ifndef ATBM_11W_TEST
 	if(t->tx_info->control.hw_key)
 	{
 		if (t->tx_info->control.hw_key->cipher == WLAN_CIPHER_SUITE_AES_CMAC){
-			printk("11w WLAN_CIPHER_SUITE_AES_CMAC\n");
+			atbm_printk_debug("11w WLAN_CIPHER_SUITE_AES_CMAC\n");
 			mmie = (struct ieee80211_mmie *) atbm_skb_put(t->skb, sizeof(*mmie));
 			memset(mmie,0,sizeof(struct ieee80211_mmie));
 			mmie->element_id = WLAN_EID_MMIE;
@@ -835,12 +833,12 @@ atbm_tx_h_crypt(struct atbm_vif *priv,
 	 struct atbm_ieee80211_mgmt *mgmt = (struct atbm_ieee80211_mgmt *)t->skb->data;
 	 if(ieee80211_is_deauth(mgmt->frame_control))
 	 {
-	 	printk("da mac %pM,protec(%d)\n",mgmt->da,t->hdr->frame_control&
+	 	atbm_printk_debug("da mac %pM,protec(%d)\n",mgmt->da,t->hdr->frame_control&
 	     __cpu_to_le32(IEEE80211_FCTL_PROTECTED));
 	 	if(!memcmp(mgmt->da,broadcast_addr,sizeof(broadcast_addr)))
 	 	{
 	 		extern u8 aes_mac_key_index;
-	 		printk("11w WLAN_CIPHER_SUITE_AES_CMAC,key_index(%d)\n",aes_mac_key_index);
+	 		atbm_printk_debug("11w WLAN_CIPHER_SUITE_AES_CMAC,key_index(%d)\n",aes_mac_key_index);
 			mmie = (struct ieee80211_mmie *) atbm_skb_put(t->skb, sizeof(*mmie));
 			memset(mmie,0,sizeof(struct ieee80211_mmie));
 			mmie->element_id = WLAN_EID_MMIE;
@@ -853,6 +851,9 @@ atbm_tx_h_crypt(struct atbm_vif *priv,
 }
 
 #endif
+	
+	t->tx_info->sg_tailneed = 0;
+
 	if (!t->tx_info->control.hw_key ||
 	    !(t->hdr->frame_control &
 	     __cpu_to_le32(IEEE80211_FCTL_PROTECTED)))
@@ -863,45 +864,51 @@ atbm_tx_h_crypt(struct atbm_vif *priv,
 
 	if (t->tx_info->control.hw_key->cipher == WLAN_CIPHER_SUITE_TKIP)
 		icv_len += 8; /* MIC */
-
-	if ((atbm_skb_headroom(t->skb) + atbm_skb_tailroom(t->skb) <
-			 iv_len + icv_len + WSM_TX_EXTRA_HEADROOM) ||
-			(atbm_skb_headroom(t->skb) <
-			 iv_len + WSM_TX_EXTRA_HEADROOM)) {
-		wiphy_err(priv->hw->wiphy,
-			"Bug: no space allocated for crypto headers.\n"
-			"headroom: %d, tailroom: %d, "
-			"req_headroom: %d, req_tailroom: %d\n"
-			"Please fix it in atbm_get_skb().\n",
-			atbm_skb_headroom(t->skb), atbm_skb_tailroom(t->skb),
-			iv_len + WSM_TX_EXTRA_HEADROOM, icv_len);
-		return -ENOMEM;
-	} else if (atbm_skb_tailroom(t->skb) < icv_len) {
-		size_t offset = icv_len - atbm_skb_tailroom(t->skb);
-		u8 *p;
-		if(!(t->tx_info->control.hw_key->flags & IEEE80211_KEY_FLAG_ALLOC_IV))
-		{
-			p = atbm_skb_push(t->skb, offset);
-			memmove(p, &p[offset], t->skb->len - offset);
-			atbm_skb_trim(t->skb, t->skb->len - offset);
+	if(!skb_is_nonlinear(t->skb)){
+		if ((atbm_skb_headroom(t->skb) + atbm_skb_tailroom(t->skb) <
+				 iv_len + icv_len + WSM_TX_EXTRA_HEADROOM) ||
+				(atbm_skb_headroom(t->skb) <
+				 iv_len + WSM_TX_EXTRA_HEADROOM)) {
+			atbm_printk_warn("Bug: no space allocated for crypto headers.\n"
+				"headroom: %d, tailroom: %d, "
+				"req_headroom: %d, req_tailroom: %d\n"
+				"Please fix it in atbm_get_skb().\n",
+				atbm_skb_headroom(t->skb), atbm_skb_tailroom(t->skb),
+				iv_len + WSM_TX_EXTRA_HEADROOM, icv_len);
+			return -ENOMEM;
+		} else if (atbm_skb_tailroom(t->skb) < icv_len) {
+			size_t offset = icv_len - atbm_skb_tailroom(t->skb);
+			u8 *p;
+			if(!(t->tx_info->control.hw_key->flags & IEEE80211_KEY_FLAG_ALLOC_IV))
+			{
+				p = atbm_skb_push(t->skb, offset);
+				memmove(p, &p[offset], t->skb->len - offset);
+				atbm_skb_trim(t->skb, t->skb->len - offset);
+			}
+			else
+			{
+				atbm_printk_warn("Slowpath: tailroom is not big enough. "
+				"Req: %d, got: %d.\n",icv_len, atbm_skb_tailroom(t->skb));
+				return -ENOMEM;
+			}
+			
 		}
-		else
-		{
-			wiphy_warn(priv->hw->wiphy,
-			"Slowpath: tailroom is not big enough. "
-			"Req: %d, got: %d.\n",
-			icv_len, atbm_skb_tailroom(t->skb));
+		atbm_skb_put(t->skb, icv_len);
+	}else {
+		if(atbm_skb_headroom(t->skb) < iv_len + WSM_TX_EXTRA_HEADROOM){
+			atbm_printk_warn("Bug: skb_sg_no space allocated for crypto headers.\n"
+				"headroom: %d"
+				"req_headroom: %d, req_tailroom: %d\n"
+				"Please fix it in atbm_get_skb().\n",
+				atbm_skb_headroom(t->skb),iv_len + WSM_TX_EXTRA_HEADROOM, icv_len);
 			return -ENOMEM;
 		}
-		
+		t->tx_info->sg_tailneed = icv_len;
 	}
-
 	newhdr = atbm_skb_push(t->skb, iv_len);
 	memmove(newhdr, newhdr + iv_len, t->hdrlen);
 	t->hdr = (struct ieee80211_hdr *) newhdr;
 	t->hdrlen += iv_len;
-	icv = atbm_skb_put(t->skb, icv_len);
-
 	return 0;
 }
 
@@ -916,7 +923,7 @@ atbm_tx_h_align(struct atbm_vif *priv,
 		return 0;
 
 	if (offset & 1) {
-		wiphy_err(priv->hw->wiphy,
+		atbm_printk_err(
 			"Bug: attempt to transmit a frame "
 			"with wrong alignment: %d\n",
 			offset);
@@ -924,7 +931,7 @@ atbm_tx_h_align(struct atbm_vif *priv,
 	}
 
 	if (atbm_skb_headroom(t->skb) < offset) {
-		wiphy_err(priv->hw->wiphy,
+		atbm_printk_err(
 			"Bug: no space allocated "
 			"for DMA alignment.\n"
 			"headroom: %d\n",
@@ -938,7 +945,7 @@ atbm_tx_h_align(struct atbm_vif *priv,
 	atbm_debug_tx_align(priv);
 	return 0;
 }
-
+#ifdef CONFIG_ATBM_DRIVER_PROCESS_BA
 static int
 atbm_tx_h_action(struct atbm_vif *priv,
 		   struct atbm_txinfo *t)
@@ -952,7 +959,7 @@ atbm_tx_h_action(struct atbm_vif *priv,
 	else
 		return 0;
 }
-
+#endif
 /* Add WSM header */
 static struct wsm_tx *
 atbm_tx_h_wsm(struct atbm_vif *priv,
@@ -961,7 +968,7 @@ atbm_tx_h_wsm(struct atbm_vif *priv,
 	struct wsm_tx *wsm;
 
 	if (atbm_skb_headroom(t->skb) < sizeof(struct wsm_tx)) {
-		wiphy_err(priv->hw->wiphy,
+		atbm_printk_err(
 			"Bug: no space allocated "
 			"for WSM header.\n"
 			"headroom: %d\n",
@@ -972,19 +979,19 @@ atbm_tx_h_wsm(struct atbm_vif *priv,
 	t->txpriv.offset += sizeof(struct wsm_tx);
 	memset(wsm, 0, sizeof(*wsm));
 #ifdef USB_BUS_BUG
-	if(__cpu_to_le16(t->skb->len) < 1500)
-		wsm->hdr.usb_len = 1500;//__cpu_to_le16(t->skb->len);
+	if(t->skb->len + t->tx_info->sg_tailneed < 1538)
+		wsm->hdr.usb_len = __cpu_to_le16(1538);//__cpu_to_le16(t->skb->len);
 	else 		
-		wsm->hdr.usb_len = __cpu_to_le16(t->skb->len)+4;
+		wsm->hdr.usb_len = __cpu_to_le16(t->skb->len + t->tx_info->sg_tailneed);
 	wsm->hdr.usb_id = __cpu_to_le16(WSM_TRANSMIT_REQ_MSG_ID);
 #endif
-	wsm->hdr.len = __cpu_to_le16(t->skb->len);
+	wsm->hdr.len = __cpu_to_le16(t->skb->len+t->tx_info->sg_tailneed);
 	wsm->hdr.id = __cpu_to_le16(WSM_TRANSMIT_REQ_MSG_ID);
 	wsm->queueId =
 		(t->txpriv.raw_link_id << 2) | wsm_queue_id_to_wsm(t->queue);
 	return wsm;
 }
-
+#ifdef CONFIG_ATBM_BT_COMB
 /* BT Coex specific handling */
 static void
 atbm_tx_h_bt(struct atbm_vif *priv,
@@ -1013,7 +1020,7 @@ atbm_tx_h_bt(struct atbm_vif *priv,
 
 		if (mgt_frame->u.assoc_req.listen_interval <
 						priv->listen_interval) {
-			txrx_printk(KERN_DEBUG
+			txrx_printk(
 				"Modified Listen Interval to %d from %d\n",
 				priv->listen_interval,
 				mgt_frame->u.assoc_req.listen_interval);
@@ -1037,15 +1044,276 @@ atbm_tx_h_bt(struct atbm_vif *priv,
 			priority = WSM_EPTA_PRIORITY_DATA;
 	}
 
-	txrx_printk(KERN_DEBUG "[TX] EPTA priority %d.\n",
+	txrx_printk( "[TX] EPTA priority %d.\n",
 		priority);
 
 	wsm->flags |= priority << 1;
 }
+#endif
 #if defined(CONFIG_NL80211_TESTMODE) || defined(CONFIG_ATBM_IOCTRL)
 
 extern int atbm_tool_shortGi;
 #endif
+#if defined (CONFIG_RATE_HW_CONTROL)
+static inline int atbm_rate_supported(struct ieee80211_sta *sta,
+				 enum ieee80211_band band,
+				 int index)
+{
+	return (sta == NULL || sta->supp_rates[band] & BIT(index));
+}
+
+static inline s8
+atbm_rate_lowest_index(struct ieee80211_supported_band *sband,
+		  struct ieee80211_sta *sta)
+{
+	int i;
+
+	for (i = 0; i < sband->n_bitrates; i++)
+		if (atbm_rate_supported(sta, sband->band, i))
+			return i;
+
+	/* warn when we cannot find a rate. */
+	WARN_ON_ONCE(1);
+
+	/* and return 0 (the lowest index) */
+	return 0;
+}
+static inline s8
+atbm_rate_lowest_non_cck_index(struct ieee80211_supported_band *sband,
+			  struct ieee80211_sta *sta)
+{
+	int i;
+
+	for (i = 0; i < sband->n_bitrates; i++) {
+		struct ieee80211_rate *srate = &sband->bitrates[i];
+		if ((srate->bitrate == 10) || (srate->bitrate == 20) ||
+		    (srate->bitrate == 55) || (srate->bitrate == 110))
+			continue;
+
+		if (atbm_rate_supported(sta, sband->band, i))
+			return i;
+	}
+
+	/* No matching rate found */
+	return 0;
+}
+static bool atbm_rate_control_send_low(struct atbm_common *hw_priv,struct atbm_txinfo *t)
+{
+	struct ieee80211_supported_band *sband=hw_priv->hw->wiphy->bands[hw_priv->channel->band];
+	struct ieee80211_tx_info *tx_info = t->tx_info;
+	struct sta_info *info_sta = NULL;
+	bool assoc = false;
+
+	if(tx_info->control.sta)
+		info_sta = container_of(tx_info->control.sta, struct sta_info, sta);
+	if(info_sta)
+		assoc = test_sta_flag(info_sta,WLAN_STA_ASSOC) ? true:false;
+	
+	if(!ieee80211_is_data(t->hdr->frame_control)){
+		tx_info->flags |= IEEE80211_TX_CTL_USE_MINRATE;
+	}
+
+	if(ieee80211_is_nullfunc(t->hdr->frame_control)){
+		tx_info->flags |= IEEE80211_TX_CTL_USE_MINRATE;
+	}
+	if(ieee80211_is_qos_nullfunc(t->hdr->frame_control)){
+		tx_info->flags |= IEEE80211_TX_CTL_USE_MINRATE;
+	}
+	
+	if((assoc == false)||
+		(tx_info->flags&IEEE80211_TX_CTL_USE_MINRATE)||
+		(tx_info->flags&IEEE80211_TX_CTL_NO_CCK_RATE)){
+		if(!(tx_info->flags&IEEE80211_TX_CTL_NO_CCK_RATE)){
+			tx_info->control.rates[0].idx = atbm_rate_lowest_index(sband, tx_info->control.sta);
+		}else {
+			tx_info->control.rates[0].idx = atbm_rate_lowest_non_cck_index(sband, t->tx_info->control.sta);
+		}
+	   	tx_info->control.rates[0].count = (tx_info->flags & IEEE80211_TX_CTL_NO_ACK) ?1 : 5/*only for test*/;
+
+		tx_info->flags |= IEEE80211_TX_CTL_USE_MINRATE;
+		/*
+		*if we are station mode and not associate with the ap
+		*check the rate according to the ap basic rate
+		*/
+		while((t->tx_info->control.vif->type == NL80211_IFTYPE_STATION)&&
+		   (ieee80211_is_mgmt(t->hdr->frame_control))){
+		   struct cfg80211_bss *cbss = NULL;
+		   struct ieee80211_bss *bss = NULL;
+		   int i = 0;
+		   int j = 0;
+		   u32 suport_rates = 0;
+		   int min_rate = INT_MAX, min_rate_index = -1;
+		   
+		   cbss = ieee80211_atbm_get_bss(hw_priv->hw->wiphy,hw_priv->channel,t->hdr->addr1,NULL,0,0,0);
+
+		   if(cbss == NULL){
+		   		break;
+		   }
+
+		   bss = (struct ieee80211_bss *)cbss->priv;
+
+		   if(bss == NULL){
+				ieee80211_atbm_put_bss(hw_priv->hw->wiphy,cbss);
+		   		break;
+		   }
+		   atbm_printk_debug("%s:supp_rates_len(%zu),rate_index(%d)\n",__func__,bss->supp_rates_len,tx_info->control.rates[0].idx);
+		  	for (i = 0; i < bss->supp_rates_len; i++) {
+				int rate = (bss->supp_rates[i] & 0x7f) * 5;
+		
+				for (j = 0; j < sband->n_bitrates; j++) {
+					if (sband->bitrates[j].bitrate == rate) {
+						suport_rates |= BIT(j);
+						
+						if (rate < min_rate) {
+							min_rate = rate;
+							min_rate_index = j;
+						}
+						break;
+					}
+				}
+			}
+			
+			atbm_printk_debug("%s:suport_rates(%x),rate_index(%d)\n",__func__,suport_rates,tx_info->control.rates[0].idx);
+			if(suport_rates == 0){
+				ieee80211_atbm_put_bss(hw_priv->hw->wiphy,cbss);
+				break;
+			}
+		    if(!(suport_rates&BIT(tx_info->control.rates[0].idx))){
+				for(i = 0; i < IEEE80211_TX_MAX_RATES; i++) {
+					tx_info->control.rates[i].idx = -1;
+					tx_info->control.rates[i].flags = 0;
+					tx_info->control.rates[i].count = 1;
+				}
+
+				tx_info->control.rates[0].idx = min_rate_index;
+				tx_info->control.rates[0].count = 5;
+		    }
+			ieee80211_atbm_put_bss(hw_priv->hw->wiphy,cbss);
+			break;
+		}
+		return true;
+	}
+
+	return false;
+}
+static int atbm_tx_h_rate_policy(struct atbm_common *hw_priv,
+			struct atbm_txinfo *t,
+			struct wsm_tx *wsm)
+{
+	struct ieee80211_supported_band *sband=hw_priv->hw->wiphy->bands[hw_priv->channel->band];
+	struct ieee80211_tx_info *tx_info = t->tx_info;
+	struct atbm_vif *priv = ABwifi_get_vif_from_ieee80211(t->tx_info->control.vif);
+	int i = 0;
+	
+	t->txpriv.rate_id = 0;
+	wsm->flags |= t->txpriv.rate_id << 4;
+	/*
+	*clear rate control
+	*/
+	for (i = 0; i < IEEE80211_TX_MAX_RATES; i++) {
+		tx_info->control.rates[i].idx = -1;
+		tx_info->control.rates[i].flags = 0;
+		tx_info->control.rates[i].count = 1;
+	}
+	
+	if(atbm_rate_control_send_low(hw_priv,t) == false){
+		
+		if(tx_info->control.sta){
+			u32 rate_mask = 0;
+			/*
+			*ht_supported is true,get 11n rate,others 11g rate
+			*/
+			if((tx_info->control.sta->ht_cap.ht_supported == true)&&
+			   (tx_info->control.sta->ht_cap.mcs.rx_mask[0])){
+				/*
+				*only surport one stream
+				*/
+				if(tx_info->control.sta->ht_cap.mcs.rx_mask[0] == 0xff){
+					tx_info->control.rates[0].idx = 7;
+				}else {
+					rate_mask = tx_info->control.sta->ht_cap.mcs.rx_mask[0];
+					tx_info->control.rates[0].idx = fls(rate_mask)-1;
+				}
+				atbm_printk_debug("%s:last set (%d)\n",__func__,fls(tx_info->control.sta->ht_cap.mcs.rx_mask[0])-1);
+				tx_info->control.rates[0].flags = IEEE80211_TX_RC_MCS;
+				tx_info->control.rates[0].count = 10;
+#ifdef CONFIG_LMAC_RATECTRL_RATE_BUG_FIX
+				if(hweight8(tx_info->control.sta->ht_cap.mcs.rx_mask[0]) <= 3){
+					tx_info->flags |= IEEE80211_TX_CTL_USE_MINRATE;
+				}
+#endif
+			}else if(tx_info->control.sta->supp_rates[hw_priv->channel->band]){
+				rate_mask = tx_info->control.sta->supp_rates[hw_priv->channel->band];
+				tx_info->control.rates[0].idx = fls(rate_mask)-1;
+				tx_info->control.rates[0].flags = 0;
+				tx_info->control.rates[0].count = 10;
+				
+				atbm_printk_debug("%s:last set (%d)\n",__func__,fls(rate_mask)-1);
+#ifdef CONFIG_LMAC_RATECTRL_RATE_BUG_FIX
+				if(hweight32(tx_info->control.sta->supp_rates[hw_priv->channel->band]) < 5){
+					tx_info->flags |= IEEE80211_TX_CTL_USE_MINRATE;
+				}
+#endif
+			}else {
+				tx_info->control.rates[0].idx = 0;
+				tx_info->flags |= IEEE80211_TX_CTL_USE_MINRATE;
+			}
+		}else {
+			/*
+			*no sta ,get lower rate
+			*/
+			tx_info->control.rates[0].idx = atbm_rate_lowest_index(sband,tx_info->control.sta);
+			tx_info->flags |= IEEE80211_TX_CTL_USE_MINRATE;
+		}
+		
+	}
+
+	t->rate = atbm_get_tx_rate(hw_priv,
+		&t->tx_info->control.rates[0]);
+	wsm->maxTxRate = t->rate->hw_value;
+
+	if(t->tx_info->flags&IEEE80211_TX_CTL_USE_MINRATE){
+		wsm->htTxParameters |= __cpu_to_le32(WSM_HT_TX_USE_MINRATE);
+	}
+
+	if (t->rate->flags & IEEE80211_TX_RC_MCS) {
+#ifndef CONFIG_ATBM_APOLLO_TESTMODE
+		if (priv->association_mode.greenfieldMode)
+			wsm->htTxParameters |=
+				__cpu_to_le32(WSM_HT_TX_GREENFIELD);
+		else
+			wsm->htTxParameters |=
+				__cpu_to_le32(WSM_HT_TX_MIXED);
+
+#else
+		if (t->tx_info->control.rates[0].flags & IEEE80211_TX_RC_GREEN_FIELD)
+		{
+			wsm->htTxParameters |=
+				__cpu_to_le32(WSM_HT_TX_GREENFIELD);
+			priv->association_mode.greenfieldMode = 1;
+		}
+		else
+		{
+			wsm->htTxParameters |=
+				__cpu_to_le32(WSM_HT_TX_MIXED);
+			priv->association_mode.greenfieldMode = 0;
+		}
+#endif //CONFIG_ATBM_APOLLO_TESTMODE
+		if ((t->tx_info->control.rates[0].flags & IEEE80211_TX_RC_SHORT_GI)
+#if defined(CONFIG_NL80211_TESTMODE) || defined(CONFIG_ATBM_IOCTRL)
+			||(atbm_tool_shortGi == 1)
+#endif
+			)//IEEE80211_TX_RC_SHORT_GI
+		{
+			if(wsm->htTxParameters&(__cpu_to_le32(WSM_HT_TX_MIXED)))
+				wsm->htTxParameters |=
+					__cpu_to_le32(WSM_HT_TX_SGI);
+		}
+	}
+
+	return 0;
+}
+#else
 static int
 atbm_tx_h_rate_policy(struct atbm_common *hw_priv,
 			struct atbm_txinfo *t,
@@ -1123,6 +1391,9 @@ atbm_tx_h_rate_policy(struct atbm_common *hw_priv,
 	}
 __rate_set_end:
 #endif //(OLD_RATE_POLICY==0)
+	if(t->tx_info->flags&IEEE80211_TX_CTL_USE_MINRATE){
+		wsm->htTxParameters |= __cpu_to_le32(WSM_HT_TX_USE_MINRATE);
+	}
 	if (t->rate->flags & IEEE80211_TX_RC_MCS) {
 #ifndef CONFIG_ATBM_APOLLO_TESTMODE
 		if (priv->association_mode.greenfieldMode)
@@ -1159,11 +1430,11 @@ __rate_set_end:
 	}
 #ifdef CONFIG_ATBM_APOLLO_TESTMODE1
 	if(time_is_before_jiffies(g_printf_time+5*HZ)){
-		printk("rate = %d, flags = %d\n", t->rate->bitrate, t->rate->flags);
-		printk("wsm->maxTxRate = %d\n", wsm->maxTxRate);
-		printk("greenfieldMode = %s,", (priv->association_mode.greenfieldMode)?"greenfield":"mixed");
-		printk("%s GI\n", (t->tx_info->control.rates[0].flags & IEEE80211_TX_RC_SHORT_GI)?"short":"long");
-		printk("queuePending :[VO]<%d>[Vi]<%d>[BE]<%d>[BK]<%d> \n",
+		atbm_printk_always("rate = %d, flags = %d\n", t->rate->bitrate, t->rate->flags);
+		atbm_printk_always("wsm->maxTxRate = %d\n", wsm->maxTxRate);
+		atbm_printk_always("greenfieldMode = %s,", (priv->association_mode.greenfieldMode)?"greenfield":"mixed");
+		atbm_printk_always("%s GI\n", (t->tx_info->control.rates[0].flags & IEEE80211_TX_RC_SHORT_GI)?"short":"long");
+		atbm_printk_always("queuePending :[VO]<%d>[Vi]<%d>[BE]<%d>[BK]<%d> \n",
 			 hw_priv->tx_queue[0].num_pending,
 			 hw_priv->tx_queue[1].num_pending,
 			 hw_priv->tx_queue[2].num_pending,
@@ -1175,7 +1446,7 @@ __rate_set_end:
 
 #if OLD_RATE_POLICY
 	if (tx_policy_renew) {
-		tx_policy_printk(KERN_DEBUG "[TX] TX policy renew.\n");
+		tx_policy_printk( "[TX] TX policy renew.\n");
 		/* It's not so optimal to stop TX queues every now and then.
 		 * Maybe it's better to reimplement task scheduling with
 		 * a counter. */
@@ -1192,7 +1463,7 @@ __rate_set_end:
 #endif//#if OLD_RATE_POLICY
 	return 0;
 }
-
+#endif
 static bool
 atbm_tx_h_pm_state(struct atbm_vif *priv,
 		     struct atbm_txinfo *t)
@@ -1212,7 +1483,7 @@ atbm_tx_h_pm_state(struct atbm_vif *priv,
 
 	return !was_buffered;
 }
-
+#ifdef CONFIG_ATBM_BA_STATUS
 static void
 atbm_tx_h_ba_stat(struct atbm_vif *priv,
 		    struct atbm_txinfo *t)
@@ -1237,7 +1508,7 @@ atbm_tx_h_ba_stat(struct atbm_vif *priv,
 	hw_priv->ba_cnt++;
 	spin_unlock_bh(&hw_priv->ba_lock);
 }
-
+#endif
 static int
 atbm_tx_h_skb_pad(struct atbm_common *priv,
 		    struct wsm_tx *wsm,
@@ -1252,8 +1523,17 @@ atbm_tx_h_skb_pad(struct atbm_common *priv,
 	return 0;
 }
 /* ******************************************************************** */
+#if 0
 extern 	int atbm_tcp_ack_offload(struct atbm_queue *queue,struct atbm_txpriv *txpriv,struct sk_buff *skb_new);
-
+#endif
+static void atbm_tx_hif_xmit(struct atbm_common *hw_priv)
+{
+	if(!hw_priv->sbus_ops->sbus_data_write){
+		atbm_bh_wakeup(hw_priv);
+	}else {
+		hw_priv->sbus_ops->sbus_data_write(hw_priv->sbus_priv);
+	}
+}
 void __atbm_tx(struct ieee80211_hw *dev, struct sk_buff *skb)
 {
 	struct atbm_common *hw_priv = dev->priv;
@@ -1275,23 +1555,19 @@ void __atbm_tx(struct ieee80211_hw *dev, struct sk_buff *skb)
 	int ret;
 	struct atbm_vif *priv;
 	struct ieee80211_hdr *frame = (struct ieee80211_hdr *)skb->data;
-        struct atbm_ieee80211_mgmt *mgmt = (struct atbm_ieee80211_mgmt *)skb->data;
+#ifdef CONFIG_ATBM_SUPPORT_P2P
+    struct atbm_ieee80211_mgmt *mgmt = (struct atbm_ieee80211_mgmt *)skb->data;
+#endif
 	if (!skb->data)
 		BUG_ON(1);
 
 	if (!(t.tx_info->control.vif)) {
+			atbm_printk_err("[TX]:vif is NULL\n");
 	        goto drop;
 	}
 	priv = ABwifi_get_vif_from_ieee80211(t.tx_info->control.vif);
 	if (!priv)
 		goto drop;
-	#ifdef RESET_CHANGE
-	if(atomic_read(&hw_priv->reset_flag))
-	{
-		printk("%s:hw_priv->reset_flag lock \n",__func__);
-		goto drop;
-	}
-	#endif
 	if (atomic_read(&priv->enabled) == 0)
 		goto drop;
 
@@ -1343,6 +1619,8 @@ void __atbm_tx(struct ieee80211_hw *dev, struct sk_buff *skb)
 		}
 	}
 #endif
+
+#ifdef CONFIG_ATBM_SUPPORT_P2P
 	if ((ieee80211_is_action(frame->frame_control))
                         && (mgmt->u.action.category == WLAN_CATEGORY_PUBLIC)) {
                 u8 *action = (u8*)&mgmt->u.action.category;				
@@ -1353,11 +1631,12 @@ void __atbm_tx(struct ieee80211_hw *dev, struct sk_buff *skb)
 #ifdef ATBM_P2P_CHANGE
 	atbm_parase_p2p_action_frame(priv,skb,true);
 #endif
+#endif
 #ifdef ATBM_11W_TEST
 	if(ieee80211_is_deauth(frame->frame_control))
 	{
 		memcpy(mgmt->da,broadcast_addr,6);
-		printk("ATBM_11W_TEST\n");
+		atbm_printk_debug("ATBM_11W_TEST\n");
 	}
 #endif
 #ifdef USB_BUS
@@ -1372,10 +1651,14 @@ void __atbm_tx(struct ieee80211_hw *dev, struct sk_buff *skb)
 */
 #ifdef CONFIG_PM
 	if (ieee80211_is_auth(frame->frame_control)){
-		printk(KERN_ERR "%s:authen, delay suspend\n",__func__);
+		atbm_printk_pm("[TX]:authen, delay suspend\n");
 		atbm_pm_stay_awake(&hw_priv->pm_state, 5*HZ);
 	}
 #endif
+	if(ieee80211_is_deauth(frame->frame_control)){
+		atbm_printk_pm("[TX]:[%d]:deatuhen[%pM]\n",priv->if_id,ieee80211_get_DA(t.hdr));
+	}
+
 	t.txpriv.if_id = priv->if_id;
 	t.hdrlen = ieee80211_hdrlen(t.hdr->frame_control);
 	t.da = ieee80211_get_DA(t.hdr);
@@ -1430,9 +1713,11 @@ void __atbm_tx(struct ieee80211_hw *dev, struct sk_buff *skb)
 	ret = atbm_tx_h_align(priv, &t, &flags);
 	if (ret)
 		goto drop;
+#ifdef CONFIG_ATBM_DRIVER_PROCESS_BA
 	ret = atbm_tx_h_action(priv, &t);
 	if (ret)
 		goto drop;
+#endif
 	wsm = atbm_tx_h_wsm(priv, &t);
 	if (!wsm) {
 		ret = -ENOMEM;
@@ -1442,7 +1727,9 @@ void __atbm_tx(struct ieee80211_hw *dev, struct sk_buff *skb)
 	flags |= WSM_TX_FLAG_EXPIRY_TIME;
 #endif /*CONFIG_ATBM_APOLLO_TESTMODE*/
 	wsm->flags |= flags;
+#ifdef CONFIG_ATBM_BT_COMB
 	atbm_tx_h_bt(priv, &t, wsm);
+#endif
 	ret = atbm_tx_h_rate_policy(hw_priv, &t, wsm);
 	if (ret){
 		ret = -1;
@@ -1450,16 +1737,26 @@ void __atbm_tx(struct ieee80211_hw *dev, struct sk_buff *skb)
 	}
 #if defined (CONFIG_TX_NO_CONFIRM)||defined(ATBM_SDIO_PATCH)
 	wsm->htTxParameters &= ~(__cpu_to_le32(WSM_NEED_TX_CONFIRM));
-	if(skb->protocol == cpu_to_be16(ETH_P_PAE)){
+	if((IEEE80211_TX_CTL_REQ_TX_STATUS |IEEE80211_TX_CTL_INJECTED)&t.tx_info->flags){
 		wsm->htTxParameters |=__cpu_to_le32(WSM_NEED_TX_CONFIRM);
-		printk(KERN_DEBUG "%s:ETH_P_PAE(%p)\n",__func__,wsm);
-	}
-
-	if(!ieee80211_is_data(t.hdr->frame_control)){
+		atbm_printk_tx("tx_status(%d),ctl_injected(%d)\n",!!(t.tx_info->flags&IEEE80211_TX_CTL_REQ_TX_STATUS),
+				!!(t.tx_info->flags&IEEE80211_TX_CTL_INJECTED));
+	}else if(skb->protocol == cpu_to_be16(ETH_P_PAE)){
 		wsm->htTxParameters |=__cpu_to_le32(WSM_NEED_TX_CONFIRM);
-		printk(KERN_DEBUG "%s:not data(%p)(%d)\n",__func__,wsm,wsm->htTxParameters&__cpu_to_le32(WSM_NEED_TX_CONFIRM));
-	}
-//	wsm->htTxParameters |=__cpu_to_le32(WSM_NEED_TX_CONFIRM);
+		atbm_printk_tx("[TX]:ETH_P_PAE(%p)\n",wsm);
+	}else if(!ieee80211_is_data(t.hdr->frame_control)){
+		wsm->htTxParameters |=__cpu_to_le32(WSM_NEED_TX_CONFIRM);
+		atbm_printk_tx("[TX]:not data(%p)(%d)\n",wsm,wsm->htTxParameters&__cpu_to_le32(WSM_NEED_TX_CONFIRM));
+	}else if(ieee80211_is_nullfunc(t.hdr->frame_control)){
+		atbm_printk_tx("[TX]:null data\n");
+		wsm->htTxParameters |=__cpu_to_le32(WSM_NEED_TX_CONFIRM);
+	}else if( ieee80211_is_qos_nullfunc(t.hdr->frame_control)){
+		wsm->htTxParameters |=__cpu_to_le32(WSM_NEED_TX_CONFIRM);
+		atbm_printk_tx("[TX]:qos null data\n");
+	} 
+#ifdef CONFIG_TX_NO_CONFIRM_DEBUG
+	wsm->htTxParameters |= __cpu_to_le32(WSM_NEED_TX_CONFIRM);
+#endif
 #endif //CONFIG_TX_NO_CONFIRM	
 	ret = atbm_tx_h_skb_pad(hw_priv, wsm, skb);
 	if (ret){
@@ -1480,7 +1777,9 @@ void __atbm_tx(struct ieee80211_hw *dev, struct sk_buff *skb)
 	//atbm_tx_udp(priv,t.skb,wsm);
 
 	//printk("%s %d fc =%x\n",__func__,__LINE__,t.hdr->frame_control);
+#ifdef CONFIG_ATBM_BA_STATUS
 	atbm_tx_h_ba_stat(priv, &t);
+#endif
 	spin_lock_bh(&priv->ps_state_lock);
 	{
 		tid_update = atbm_tx_h_pm_state(priv, &t);
@@ -1494,7 +1793,7 @@ void __atbm_tx(struct ieee80211_hw *dev, struct sk_buff *skb)
 				t.txpriv.tid, true);
 
 	rcu_read_unlock();
-	atbm_bh_wakeup(hw_priv);
+	atbm_tx_hif_xmit(hw_priv);
 
 	return;
 
@@ -1508,10 +1807,9 @@ drop:
 /* ******************************************************************** */
 void atbm_tx(struct ieee80211_hw *dev, struct sk_buff *skb)
 {
- 	struct ieee80211_tx_info *tx_info = IEEE80211_SKB_CB(skb);
-	struct atbm_vif *priv = ABwifi_get_vif_from_ieee80211(tx_info->control.vif);
-	
-	atbm_tx_udp(priv,skb);
+
+
+	atbm_tx_udp(dev,skb);
 	__atbm_tx(dev, skb);
 
 }
@@ -1559,7 +1857,7 @@ static int atbm_handle_pspoll(struct atbm_vif *priv,
 			break;
 		}
 	}
-	txrx_printk(KERN_DEBUG "[RX] PSPOLL: %s\n", drop ? "local" : "fwd");
+	txrx_printk( "[RX] PSPOLL: %s\n", drop ? "local" : "fwd");
 done:
 	return drop;
 }
@@ -1574,26 +1872,30 @@ void atbm_tx_confirm_cb(struct atbm_common *hw_priv,
 	struct sk_buff *skb;
 	const struct atbm_txpriv *txpriv;
 	struct atbm_vif *priv;
+	int tx_count;
+	u8 ht_flags;
+#ifndef CONFIG_TX_NO_CONFIRM
+	int i;
+#endif
 
-	txrx_printk(KERN_DEBUG "[TX] TX confirm: %d, %d.\n",
+	txrx_printk( "[TX] TX confirm: %d, %d.\n",
 		arg->status, arg->ackFailures);
 	if(queue_id >= 4){
-		printk("atbm_tx_confirm_cb %d\n",queue_id);
+		atbm_printk_tx("atbm_tx_confirm_cb %d\n",queue_id);
 	}
 	if(WARN_ON(!queue)){
-		printk("atbm_tx_confirm_cb queue %p\n",queue);
+		atbm_printk_err("atbm_tx_confirm_cb queue %p\n",queue);
 		return;
 	}
 
 	priv = ABwifi_hwpriv_to_vifpriv(hw_priv, arg->if_id);
 	if (unlikely(!priv)){
-		printk("<warning>%s arg_if_id %d\n",__func__,arg->if_id);
+		atbm_printk_err("[confirm]:arg_if_id %d\n",arg->if_id);
 		return;
 	}
 	if (unlikely(priv->mode == NL80211_IFTYPE_UNSPECIFIED)) {
 		/* STA is stopped. */
 		atbm_priv_vif_list_read_unlock(&priv->vif_lock);
-		printk("<warning> %s %d\n",__func__,__LINE__);
 		return;
 	}
 
@@ -1602,7 +1904,7 @@ void atbm_tx_confirm_cb(struct atbm_common *hw_priv,
 		return;
 	}
 	if(WARN_ON(arg ==NULL)){
-		printk("atbm_tx_confirm_cb arg %p\n",arg);
+		atbm_priv_vif_list_read_unlock(&priv->vif_lock);
 		return;
 	}
 #ifdef ATBM_SDIO_PATCH
@@ -1618,7 +1920,7 @@ void atbm_tx_confirm_cb(struct atbm_common *hw_priv,
         }
 #endif
 	if (arg->status)
-		txrx_printk(KERN_DEBUG "TX failed: %d.\n",
+		txrx_printk( "TX failed: %d.\n",
 				arg->status);
 
 #ifdef CONFIG_ATBM_APOLLO_TESTMODE
@@ -1649,7 +1951,7 @@ void atbm_tx_confirm_cb(struct atbm_common *hw_priv,
 				hw_priv->tsm_info.txconf_timestamp_vo;
 				if (hw_priv->tsm_info.roam_delay > pkt_delay)
 					hw_priv->tsm_info.roam_delay -= pkt_delay;
-				txrx_printk(KERN_DEBUG "[TX] txConf"
+				txrx_printk( "[TX] txConf"
 				"Roaming: roam_delay = %u\n",
 				hw_priv->tsm_info.roam_delay);
 				hw_priv->tsm_info.sta_roamed = 0;
@@ -1669,12 +1971,12 @@ void atbm_tx_confirm_cb(struct atbm_common *hw_priv,
 			.if_id = arg->if_id,
 		};
 		atbm_suspend_resume(priv, &suspend);
-		wiphy_warn(priv->hw->wiphy, "Requeue for link_id %d (try %d)."
+		atbm_printk_warn("Requeue for link_id %d (try %d)."
 			" STAs asleep: 0x%.8X\n",
 			arg->link_id,
 			atbm_queue_get_generation(arg->packetID) + 1,
 			priv->sta_asleep_mask);
-		printk("<WARNING> %s 111\n",__func__);
+		atbm_printk_debug("<WARNING> %s 111\n",__func__);
 #ifdef CONFIG_ATBM_APOLLO_TESTMODE
 		WARN_ON(atbm_queue_requeue(hw_priv, queue,
 				arg->packetID, true));
@@ -1695,39 +1997,89 @@ void atbm_tx_confirm_cb(struct atbm_common *hw_priv,
 	} else if (!WARN_ON(atbm_queue_get_skb(
 			queue, arg->packetID, &skb, &txpriv))) {
 		struct ieee80211_tx_info *tx = IEEE80211_SKB_CB(skb);
-		int tx_count = arg->ackFailures;
-		u8 ht_flags = 0;
-		int i;
+		if(tx==NULL){
+			atbm_printk_err("TX IS NULL\n");
+			atbm_priv_vif_list_read_unlock(&priv->vif_lock);
+			BUG_ON(1);
+			return ;
+		}
+		tx_count = arg->ackFailures;
+		ht_flags = 0;
+		/*
+		*retry eap frame to prevent that sta connect ap too slowly
+		*/
+		while(arg->status){
+			if(atbm_queue_get_generation(arg->packetID) >= 2){
+				atbm_printk_err( "[confirm]:eap retry to mamy(%x)\n",arg->packetID);
+				break;
+			}
+
+			if(skb->protocol != cpu_to_be16(ETH_P_PAE)){
+				break;
+			}
+
+			#ifdef CONFIG_ATBM_APOLLO_TESTMODE
+			WARN_ON(atbm_queue_requeue(hw_priv, queue,
+					arg->packetID, true));
+			#else
+			WARN_ON(atbm_queue_requeue(queue,
+					arg->packetID, true));
+			#endif
+
+			atbm_printk_tx( "retry eap frame\n");
+			atbm_priv_vif_list_read_unlock(&priv->vif_lock);
+
+			atbm_bh_wakeup(hw_priv);
+			return;
+		}
+#ifdef CONFIG_ATBM_SUPPORT_P2P
 		/*
 		*when in listen state,we send action again
 		*
 		*/
 		while((arg->status)&&(arg->status != 1)){
 			struct ieee80211_hdr *frame = (struct ieee80211_hdr *)(skb->data+txpriv->offset);
+			/*
+			*at t920 platform,if we retry the frame too many times maybe triger the wtd.
+			*so let the top of the retry times be 5 to prevent triger the system wtd
+			*/
+			if(frame==NULL){
+				atbm_printk_tx("frame is null\n");
+				atbm_priv_vif_list_read_unlock(&priv->vif_lock);
+				BUG_ON(1);
+				return ;
+			}
+			if(atbm_queue_get_generation(arg->packetID) >= 5){
+				atbm_printk_err( "[confirm]:retry to many times(%x)\n",arg->packetID);
+				break;
+			}
+			
+			if(arg->status != WSM_STATUS_RETRY_EXCEEDED){
+				atbm_printk_err("[confirm]:status(%d)\n",arg->status);
+				break;
+			}
+			
 			if(!atomic_read(&hw_priv->remain_on_channel)){
 				break;
 			}
 
 			if(txpriv->if_id != hw_priv->roc_if_id){
-				printk(KERN_ERR "%s:txpriv->if_id(%d),hw_priv->roc_if_id(%d)\n",__func__,txpriv->if_id,hw_priv->roc_if_id);
 				break;
 			}
 			
 			if(!(tx->flags & IEEE80211_TX_INTFL_NL80211_FRAME_TX)){
-				printk(KERN_ERR "%s:not NL80211_FRAME_TX\n",__func__);
 				break;
 			}
 			if(!(tx->flags & IEEE80211_TX_CTL_REQ_TX_STATUS)){
-				printk(KERN_ERR "%s:not REQ_TX_STATUS\n",__func__);
 				break;
 			}
-			if(!time_is_after_jiffies(hw_priv->roc_start_time+((hw_priv->roc_duration+35)*HZ)/1000)){
-				printk(KERN_ERR "%s:roc time is not enough to retry transmit\n",__func__);
+			
+			if(!time_is_after_jiffies(hw_priv->roc_start_time+msecs_to_jiffies(hw_priv->roc_duration+35))){
+				atbm_printk_err( "[confirm]:timeout\n");
 				break;
 			}
 
 			if(!ieee80211_is_action(frame->frame_control)){
-				printk(KERN_ERR "%s:not action(%x)\n",__func__,frame->frame_control);
 				break;
 			}
 			#ifdef CONFIG_ATBM_APOLLO_TESTMODE
@@ -1738,13 +2090,15 @@ void atbm_tx_confirm_cb(struct atbm_common *hw_priv,
 					arg->packetID, false));
 			#endif
 
-			printk(KERN_ERR "%s:retry remain on channel pkg\n",__func__);
+			atbm_printk_tx("%s:retry[%d][%x],start[%ld],duration[%ld],now(%ld)\n",__func__,arg->status,
+					arg->packetID,hw_priv->roc_start_time,msecs_to_jiffies(hw_priv->roc_duration+35),jiffies);
 			atbm_priv_vif_list_read_unlock(&priv->vif_lock);
 
 			atbm_bh_wakeup(hw_priv);
 			return;
 			
 		}
+#endif
 		if (priv->association_mode.greenfieldMode)
 			ht_flags |= IEEE80211_TX_RC_GREEN_FIELD;
 
@@ -1762,6 +2116,7 @@ void atbm_tx_confirm_cb(struct atbm_common *hw_priv,
 				atbm_debug_txed_agg(priv);
 			}
 		} else {
+#ifndef CONFIG_TX_NO_CONFIRM
 			spin_lock_bh(&priv->bss_loss_lock);
 			if (priv->bss_loss_status ==
 					ATBM_APOLLO_BSS_LOSS_CONFIRMING &&
@@ -1786,8 +2141,10 @@ void atbm_tx_confirm_cb(struct atbm_common *hw_priv,
 			}
 			if (tx_count)
 				++tx_count;
+#endif
 		}
 		atbm_priv_vif_list_read_unlock(&priv->vif_lock);
+#ifndef CONFIG_TX_NO_CONFIRM
              //  printk("ackfailures:%d tx_count:%d status:%d\n", arg->ackFailures, tx_count, arg->status);
 		for (i = 0; i < IEEE80211_TX_MAX_RATES; ++i) {
 			if (tx->status.rates[i].count >= tx_count) {
@@ -1811,6 +2168,7 @@ void atbm_tx_confirm_cb(struct atbm_common *hw_priv,
 			tx->status.rates[i].count = 0;
 			tx->status.rates[i].idx = -1;
 		}
+#endif
 #ifdef CONFIG_ATBM_APOLLO_TESTMODE
 		atbm_queue_remove(hw_priv, queue, arg->packetID);
 #else
@@ -1818,7 +2176,7 @@ void atbm_tx_confirm_cb(struct atbm_common *hw_priv,
 #endif /*CONFIG_ATBM_APOLLO_TESTMODE*/
 	}else
 	{
-		printk("<warning> %s11112222\n",__func__);
+		atbm_printk_err("[confirm]:<warning>\n");
 		atbm_priv_vif_list_read_unlock(&priv->vif_lock);
 	}
 }
@@ -1826,8 +2184,6 @@ void atbm_tx_confirm_cb(struct atbm_common *hw_priv,
 static void atbm_notify_buffered_tx(struct atbm_vif *priv,
 			       struct sk_buff *skb, int link_id, int tid)
 {
-	struct ieee80211_sta *sta;
-	struct ieee80211_hdr *hdr;
 	u8 *buffered;
 	u8 still_buffered = 0;
 
@@ -1840,6 +2196,8 @@ static void atbm_notify_buffered_tx(struct atbm_vif *priv,
 		spin_unlock_bh(&priv->ps_state_lock);
 
 		if (!still_buffered && tid < ATBM_APOLLO_MAX_TID) {
+			struct ieee80211_sta *sta;
+			struct ieee80211_hdr *hdr;
 			hdr = (struct ieee80211_hdr *) skb->data;
 			rcu_read_lock();
 			sta = ieee80211_find_sta(priv->vif, hdr->addr1);
@@ -1849,7 +2207,6 @@ static void atbm_notify_buffered_tx(struct atbm_vif *priv,
 		}
 	}
 }
-
 void atbm_skb_dtor(struct atbm_common *hw_priv,
 		     struct sk_buff *skb,
 		     const struct atbm_txpriv *txpriv)
@@ -1858,19 +2215,25 @@ void atbm_skb_dtor(struct atbm_common *hw_priv,
 		__ABwifi_hwpriv_to_vifpriv(hw_priv, txpriv->if_id);
 
 	atbm_skb_pull(skb, txpriv->offset);
+	
+#ifndef CONFIG_RATE_HW_CONTROL	
 	if (priv && txpriv->rate_id != ATBM_APOLLO_INVALID_RATE_ID) {
 		atbm_notify_buffered_tx(priv, skb,
 				txpriv->raw_link_id, txpriv->tid);
 		tx_policy_put(hw_priv, txpriv->rate_id);
 	}
+#else
+	if(priv)
+		atbm_notify_buffered_tx(priv, skb,txpriv->raw_link_id, txpriv->tid);
+#endif
 //	spin_lock_bh(&priv->ps_state_lock);
 	//ieee80211_tx_status(hw_priv->hw, skb);
-	ieee80211_tx_status_irqsafe(hw_priv->hw,skb);
+	atbm_ieee80211_tx_status(hw_priv->hw,skb);
 //	spin_unlock_bh(&priv->ps_state_lock);
 
 }
 
-
+#ifdef CONFIG_ATBM_BA_STATUS
 static void
 atbm_rx_h_ba_stat(struct atbm_vif *priv,
 		    size_t hdrlen, size_t skb_len )
@@ -1892,8 +2255,7 @@ atbm_rx_h_ba_stat(struct atbm_vif *priv,
 	hw_priv->ba_cnt_rx++;
 	spin_unlock_bh(&hw_priv->ba_lock);
 }
-
-
+#endif
 void atbm_rx_cb(struct atbm_vif *priv,
 		  struct wsm_rx *arg,
 		  struct sk_buff **skb_p)
@@ -1908,33 +2270,29 @@ void atbm_rx_cb(struct atbm_vif *priv,
 	unsigned long grace_period;
 	#endif
 	bool early_data = false;
+#ifdef CONFIG_ATBM_BA_STATUS
 	size_t hdrlen = 0;
+#endif
 
 	hdr->flag = 0;
 	//atbm_rx_udp(skb);
-	#ifdef RESET_CHANGE
-	if(atomic_read(&hw_priv->reset_flag))
-	{
-		printk("%s:hw_priv->reset_flag lock \n",__func__);
-		goto drop;
-	}
-	#endif
 	if (unlikely(priv->mode == NL80211_IFTYPE_UNSPECIFIED)) {
 		/* STA is stopped. */
-		printk(KERN_ERR "priv->mode == NL80211_IFTYPE_UNSPECIFIED,seq(%x)\n",frame->seq_ctrl);
+		atbm_printk_err("priv->mode == NL80211_IFTYPE_UNSPECIFIED,seq(%x)\n",frame->seq_ctrl);
 		goto drop;
 	}
+#ifdef CONFIG_ATBM_SUPPORT_P2P
 	if ((ieee80211_is_action(frame->frame_control))
                         && (mgmt->u.action.category == WLAN_CATEGORY_PUBLIC)) {
 		u8 *action = (u8*)&mgmt->u.action.category;
 		TxRxPublicActionFrame((u8*)mgmt,skb->len,0);
 		atbm_check_go_neg_conf_success(hw_priv, action);
 	}
-	
+#endif
 #ifdef CONFIG_ATBM_APOLLO_TESTMODE
-	spin_lock_bh(&hw_priv->tsm_lock);
 	if (hw_priv->start_stop_tsm.start) {
 		unsigned queue_id = skb_get_queue_mapping(skb);
+		spin_lock_bh(&hw_priv->tsm_lock);
 		if (queue_id == 0) {
 			struct timeval tmval;
 			do_gettimeofday(&tmval);
@@ -1942,14 +2300,14 @@ void atbm_rx_cb(struct atbm_vif *priv,
 			    hw_priv->tsm_info.use_rx_roaming) {
 				hw_priv->tsm_info.roam_delay = tmval.tv_usec -
 					hw_priv->tsm_info.rx_timestamp_vo;
-				txrx_printk(KERN_DEBUG "[RX] RxInd Roaming:"
+				txrx_printk( "[RX] RxInd Roaming:"
 				"roam_delay = %u\n", hw_priv->tsm_info.roam_delay);
 				hw_priv->tsm_info.sta_roamed = 0;
 			}
 			hw_priv->tsm_info.rx_timestamp_vo = tmval.tv_usec;
 		}
+		spin_unlock_bh(&hw_priv->tsm_lock);
 	}
-	spin_unlock_bh(&hw_priv->tsm_lock);
 #endif /*CONFIG_ATBM_APOLLO_TESTMODE*/
 	if (arg->link_id && (arg->link_id != ATBM_APOLLO_LINK_ID_UNMAPPED)
 			&& (arg->link_id <= ATBM_APOLLO_MAX_STA_IN_AP_MODE)) {
@@ -1957,20 +2315,24 @@ void atbm_rx_cb(struct atbm_vif *priv,
 		if (entry->status == ATBM_APOLLO_LINK_SOFT &&
 				ieee80211_is_data(frame->frame_control))
 			early_data = true;
-		entry->timestamp = jiffies;
+		else if(entry->status == ATBM_APOLLO_LINK_HARD)
+			entry->timestamp = jiffies;
 	}
+/*
+*unusefull for p2p
+*/
+#if 0
 	else if ((arg->link_id == ATBM_APOLLO_LINK_ID_UNMAPPED)
 			&& (priv->vif->p2p)
 			&& (priv->join_status == ATBM_APOLLO_JOIN_STATUS_AP)
 			&& ieee80211_is_action(frame->frame_control)
 			&& (mgmt->u.action.category == WLAN_CATEGORY_PUBLIC)) {
 		int action_linkid = 0;
-		txrx_printk(KERN_DEBUG "[RX] Going to MAP&RESET link ID\n");
-		printk("%s line(%d):if_id(%d),WSM_START_MODE_P2P_GO reset link id\n",__func__,__LINE__,priv->if_id);
+		atbm_printk_rx("%s line(%d):if_id(%d),WSM_START_MODE_P2P_GO reset link id\n",__func__,__LINE__,priv->if_id);
 		action_linkid = atbm_find_link_id(priv,ieee80211_get_SA(frame));
 		if(action_linkid != 0)
 		{
-			printk("%s line(%d):if_id(%d),WSM_START_MODE_P2P_GO reset link id\n",__func__,__LINE__,priv->if_id);
+			atbm_printk_rx("%s line(%d):if_id(%d),WSM_START_MODE_P2P_GO reset link id\n",__func__,__LINE__,priv->if_id);
 			spin_lock_bh(&priv->ps_state_lock);
 			priv->link_id_db[action_linkid - 1].prev_status =
 				priv->link_id_db[action_linkid - 1].status;
@@ -1992,7 +2354,7 @@ void atbm_rx_cb(struct atbm_vif *priv,
 		 * Reset and Remap */
 		if(action_linkid &&(arg->link_id != action_linkid))
 		{
-			printk("Link ID already exists for the ACTION frame\n");
+			atbm_printk_rx("Link ID already exists for the ACTION frame\n");
 			spin_lock_bh(&priv->ps_state_lock);
 			priv->link_id_db[action_linkid - 1].prev_status =
 				priv->link_id_db[action_linkid - 1].status;
@@ -2002,17 +2364,25 @@ void atbm_rx_cb(struct atbm_vif *priv,
 			atbm_hw_priv_queue_work(hw_priv,&priv->linkid_reset_work);
 		}
 	}
+#endif
 	if (unlikely(arg->status)) {
 		if (arg->status == WSM_STATUS_MICFAILURE) {
-			printk(KERN_ERR "[RX] MIC failure. ENCRYPTION [%d]\n",WSM_RX_STATUS_ENCRYPTION(arg->flags));
+			atbm_printk_err( "[RX] MIC failure. ENCRYPTION [%d][%pM][%pM]\n",
+				WSM_RX_STATUS_ENCRYPTION(arg->flags),frame->addr1,frame->addr2);
 			hdr->flag |= RX_FLAG_MMIC_ERROR;
 		} else if (arg->status == WSM_STATUS_NO_KEY_FOUND) {
-			printk(KERN_ERR "[RX] No key found.ENCRYPTION [%d]\n",WSM_RX_STATUS_ENCRYPTION(arg->flags));
-			goto drop;
+			atbm_printk_err( "[RX] No key found.ENCRYPTION [%d]\n",WSM_RX_STATUS_ENCRYPTION(arg->flags));
+			if(priv->join_status != ATBM_APOLLO_JOIN_STATUS_AP){
+				hdr->flag |= RX_FLAG_UNKOWN_STA_FRAME;
+				goto drop;
+			}
 		} else {
-//			printk(KERN_ERR "[RX] Receive failure: %d.ENCRYPTION [%d],fc(%x)\n",
-//				arg->status,WSM_RX_STATUS_ENCRYPTION(arg->flags),mgmt->frame_control);
-			goto drop;
+			atbm_printk_err("[RX] Receive failure: %d.ENCRYPTION [%d],fc(%x)\n",
+				arg->status,WSM_RX_STATUS_ENCRYPTION(arg->flags),mgmt->frame_control);
+			if(priv->join_status != ATBM_APOLLO_JOIN_STATUS_AP){
+				hdr->flag |= RX_FLAG_UNKOWN_STA_FRAME;
+				goto drop;
+			}
 		}
 	}
 #ifdef CHKSUM_HW_SUPPORT
@@ -2026,16 +2396,13 @@ void atbm_rx_cb(struct atbm_vif *priv,
 	}	
 #endif
 	if (skb->len < sizeof(struct ieee80211_pspoll)) {
-		wiphy_warn(priv->hw->wiphy, "Mailformed SDU rx'ed. "
-				"Size is lesser than IEEE header.\n");
-		printk(KERN_ERR "(skb->len < sizeof(struct ieee80211_pspoll),seq(%x)\n",frame->seq_ctrl);
+		atbm_printk_err( "(skb->len < sizeof(struct ieee80211_pspoll),seq(%x)\n",frame->seq_ctrl);
 		goto drop;
 	}
 
 	if (unlikely(ieee80211_is_pspoll(frame->frame_control))){
 		if (atbm_handle_pspoll(priv, skb))
 		{
-			printk(KERN_ERR "atbm_handle_pspoll\n");
 			goto drop;
 		}
 	}
@@ -2049,7 +2416,7 @@ void atbm_rx_cb(struct atbm_vif *priv,
 		ba_params.ssn =  le16_to_cpu(bar_data->start_seq_num) >> 4;
 		ba_params.action= ATBM_BA__ACTION_RX_BAR;
 		ba_params.link_id = arg->link_id;
-		printk("rx BAR:ssn(%x),tid(%d),link_id(%d)\n",ba_params.ssn,ba_params.tid,ba_params.link_id);
+		atbm_printk_rx("rx BAR:ssn(%x),tid(%d),link_id(%d)\n",ba_params.ssn,ba_params.tid,ba_params.link_id);
 		atbm_updata_ba_tid_params(priv,&ba_params);
 		goto drop;
 	}
@@ -2109,14 +2476,20 @@ void atbm_rx_cb(struct atbm_vif *priv,
 
 	hdr->signal = (s8)arg->rcpiRssi;
 	hdr->antenna = 0;
-#ifdef	ATBM_SUPPORT_PKG_MONITOR
 	if(priv->join_status == ATBM_APOLLO_JOIN_STATUS_SIMPLE_MONITOR){
-		ieee80211_rx_irqsafe(priv->hw, skb);
+		atbm_ieee80211_rx(priv->hw, skb);
 		*skb_p = NULL;
 		return;
 	}
+#ifdef CONFIG_IEEE80211_SPECIAL_FILTER
+	if(WSM_RX_STATUS_FILTER_FRAME&arg->flags){
+		*skb_p = ieee80211_special_queue_package(priv->vif,skb);
+		return;
+	}
 #endif
+#ifdef CONFIG_ATBM_BA_STATUS
 	hdrlen = ieee80211_hdrlen(frame->frame_control);
+#endif
 #ifndef ATBM_SUPPORT_WIDTH_40M
 	if (WSM_RX_STATUS_ENCRYPTION(arg->flags)) {
 		size_t iv_len = 0, icv_len = 0;
@@ -2158,8 +2531,7 @@ void atbm_rx_cb(struct atbm_vif *priv,
 		}
 
 		if (skb->len < hdrlen + iv_len + icv_len) {
-			wiphy_warn(priv->hw->wiphy, "Mailformed SDU rx'ed. "
-				"Size is lesser than crypto headers.\n");
+			atbm_printk_warn("Mailformed SDU rx'ed.Size is lesser than crypto headers.\n");
 //			printk("skb->len < hdrlen + iv_len + icv_len,seq(%x)\n",frame->seq_ctrl);
 			goto drop;
 		}
@@ -2184,22 +2556,16 @@ void atbm_rx_cb(struct atbm_vif *priv,
 #endif
 
 #ifdef ATBM_SUPPORT_WIDTH_40M
-	if(priv->if_id == 0)
-	{
-		if(WSM_RX_STATUS_RX_40M&arg->flags)
-		{
-			hdr->flag |= RX_FLAG_40MHZ;
-			hw_priv->rx_40M_pkg_cnt++;
-			hw_priv->rx_20M_pkg_detect = 0;
-			hw_priv->rx_40M_pkg_detect ++;
-		}
-		else if (ieee80211_is_data(frame->frame_control) )
-		{
-		
-			hw_priv->rx_20M_pkg_cnt++;
-			hw_priv->rx_20M_pkg_detect++;
-			hw_priv->rx_40M_pkg_detect=0;
-		}
+	if(WSM_RX_STATUS_RX_40M&arg->flags){
+		hdr->flag |= RX_FLAG_40MHZ;
+		hw_priv->rx_40M_pkg_cnt++;
+		hw_priv->rx_20M_pkg_detect = 0;
+		hw_priv->rx_40M_pkg_detect ++;
+	}else if (ieee80211_is_data(frame->frame_control) ){
+	
+		hw_priv->rx_20M_pkg_cnt++;
+		hw_priv->rx_20M_pkg_detect++;
+		hw_priv->rx_40M_pkg_detect=0;
 	}
 #endif
 	atbm_debug_rxed(priv);
@@ -2207,21 +2573,6 @@ void atbm_rx_cb(struct atbm_vif *priv,
 		printk_once("<WIFI> rx ampdu ++ \n");
 		atbm_debug_rxed_agg(priv);
 	}
-#ifdef ATBM_SUPPORT_WIDTH_40M
-#if 0
-	if(
-		(priv->if_id != 0)
-	  )
-	{
-		
-		if(ieee80211_is_mgmt(frame->frame_control))
-		{
-			printk("%s:atbm_clear_wpas_p2p_40M_ie\n",__func__);
-			atbm_clear_wpas_p2p_40M_ie(mgmt, skb->len);
-		}
-	}
-#endif
-#endif
 	if (ieee80211_is_beacon(frame->frame_control) &&
 			!arg->status &&
 			!memcmp(ieee80211_get_SA(frame), priv->join_bssid,
@@ -2230,7 +2581,9 @@ void atbm_rx_cb(struct atbm_vif *priv,
 		u8 *ies;
 		size_t ies_len;
 		priv->disable_beacon_filter = false;
+#ifdef CONFIG_ATBM_MAC80211_NO_USE
 		atbm_hw_priv_queue_work(hw_priv, &priv->update_filtering_work);
+#endif
 		ies = ((struct atbm_ieee80211_mgmt *)
 			  (skb->data))->u.beacon.variable;
 		ies_len = skb->len - (ies - (u8 *)(skb->data));
@@ -2246,123 +2599,15 @@ void atbm_rx_cb(struct atbm_vif *priv,
 					&priv->set_beacon_wakeup_period_work);
 			}
 		}
+#ifdef CONFIG_ATBM_MAC80211_NO_USE
 		if (unlikely(priv->disable_beacon_filter)) {
 			priv->disable_beacon_filter = false;
 			atbm_hw_priv_queue_work(hw_priv,
 				&priv->update_filtering_work);
 		}
-	}
-#ifdef ATBM_PRIVATE_IE
-
-typedef struct _Wifi_Recv_Info
-{
-	unsigned char Ssid[32];
-	unsigned char channel;
-	unsigned int Rssi;		//信号强度
-	unsigned int Quality;	 //信号质量
-	unsigned char phy_noise;	//噪声
-	unsigned char Bssid[6];	//热点 WiFi MAC地址
-	unsigned char User_data[255]; //存放收到广播包后要回复私有数据
-}Wifi_Recv_Info_t;	  //接收结构体
-extern u32 atbm_get_filter_mac_addr(char *mac_addr);
-extern void atbm_set_ap_info(Wifi_Recv_Info_t *infor);
-		u32 i;
-		u8 *ies, *ie;
-		size_t ies_len;
-		u8 *priv_ie;
-		u8 len;
-		u8 *pdata;
-		u8 atbm_oui[4]={0x41,0x54,0x42,0x4D};//ATBM
-		u32 filter_sta = 0;
-
-		char found_pkt = 0;
-		char found_pro_req = 0;
-		Wifi_Recv_Info_t recv_info;
-		unsigned char filter_mac_g[8][ETH_ALEN];
-		
-		if (ieee80211_is_beacon(frame->frame_control)){
-			//printk("[IE] recv beacon pkt\n");
-			ies = ((struct atbm_ieee80211_mgmt *)
-				  (skb->data))->u.beacon.variable;
-
-			found_pkt = 1;
-		}
-		if(ieee80211_is_probe_resp(frame->frame_control)){
-			printk("[IE] recv probe resp pkt\n");
-			ies = ((struct atbm_ieee80211_mgmt *)
-				  (skb->data))->u.probe_resp.variable;
-
-			found_pkt = 1;
-		}
-
-		if(ieee80211_is_probe_req(frame->frame_control)){
-			printk("[IE] recv probe req pkt\n");
-			ies = ((struct atbm_ieee80211_mgmt *)
-				  (skb->data))->u.probe_req.variable;
-
-			found_pro_req = 1;
-			found_pkt = 1;
-		}
-
-		if(found_pkt == 1){
-			
-			//ies = ((struct atbm_ieee80211_mgmt *)
-			//	  (skb->data))->u.probe_resp.variable;
-			ies_len = skb->len - (ies - (u8 *)(skb->data));
-
-			memset(&recv_info, 0, sizeof(Wifi_Recv_Info_t));
-
-			priv_ie = atbm_get_ie(ies, ies_len, ATBM_WLAN_EID_PRIVATE);
-			//是否包含ATBM 私有字段
-			if(priv_ie){
-				struct atbm_private_ie *priv_ie_f= (struct atbm_private_ie *)priv_ie;
-				//再次确认ATBM 的OUI
-				if(0 == memcmp(priv_ie_f->Oui, atbm_oui, 4)){
-					printk("[IE] found private ie\n");
-					//获取用户设置的MAC 地址集
-					filter_sta = atbm_get_filter_mac_addr(&filter_mac_g[0][0]);
-					for(i=0;i<8;i++){
-						//根据用户设置的MAC 地址，查找符合的MAC
-						if((99 == filter_sta) || (0 == memcmp(filter_mac_g[i], frame->addr3, ETH_ALEN))){
-							//SSID
-							ie = atbm_get_ie(ies, ies_len, ATBM_WLAN_EID_SSID);
-							//frame_hexdump("atbm",ie,16);
-							len = *(++ie);
-							pdata = (++ie);
-							memcpy(recv_info.Ssid, pdata, len);
-							
-							//Channel
-							recv_info.channel = arg->channelNumber;
-
-							//Rssi
-							recv_info.Rssi = arg->rcpiRssi;
-							//printk("[IE]channel: Rssi =%d:%d:%s:%d\n",recv_info.channel,recv_info.Rssi,recv_info.Ssid,len);
-
-							//Qual
-							recv_info.Quality = 0;
-
-							//Noise
-							recv_info.phy_noise = 0;
-
-							//MAC
-							memcpy(recv_info.Bssid, frame->addr3, ETH_ALEN);
-
-							//User Data
-							memcpy(recv_info.User_data, priv_ie_f->UserData, priv_ie_f->Length-4);
-							atbm_set_ap_info(&recv_info);
-
-							break;
-						}
-					}
-					
-				}
-			}
-		}
-
-		if((found_pro_req == 1)&&(priv->join_status == ATBM_APOLLO_JOIN_STATUS_AP))
-			goto drop;
 #endif
-
+	}
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,3,0))
     if (priv->mode == NL80211_IFTYPE_AP &&( priv->join_status == ATBM_APOLLO_JOIN_STATUS_AP )&&
                     ieee80211_is_beacon(frame->frame_control) &&
                     !arg->status){
@@ -2377,10 +2622,12 @@ extern void atbm_set_ap_info(Wifi_Recv_Info_t *infor);
             if(!ht_cap){
                     priv->ht_info |= 0x0011;
             }
-            atbm_hw_priv_queue_work(hw_priv,
+			if(priv->ht_info == 0x0011)
+            	atbm_hw_priv_queue_work(hw_priv,
                             &priv->ht_info_update_work);
 
     }
+#endif
 #ifdef ATBM_SUPPORT_WIDTH_40M
 	/*
 	*Notify Channel Width frame format(8.5.12.2),handled there.
@@ -2394,11 +2641,12 @@ extern void atbm_set_ap_info(Wifi_Recv_Info_t *infor);
 	*
 	*recieve this frame , we also start chantype_change_work,and set channel_chaging.
 	*/
-	if((priv->mode == NL80211_IFTYPE_STATION)
-		&&
-		(priv->if_id == 0)
+	if(
+		((priv->vif->p2p == false))
 		&&
 		(ieee80211_is_action(frame->frame_control))
+		&&
+		(ieee80211_chw_is_ht40(vif_chw(priv->vif)))
 		&&
 		(!arg->status))
 	{
@@ -2408,46 +2656,25 @@ extern void atbm_set_ap_info(Wifi_Recv_Info_t *infor);
 			(WLAN_HT_ACTION_NOTIFY_CHANWIDTH == mgmt->u.action.u.notify_chan_width.chan_width)
 		  )
 		{
-			u8 prev_lock = !!atomic_read(&hw_priv->tx_20M_lock);
-			u8 new_lock  = 0;
-			printk("%s:WLAN_HT_ACTION_NOTIFY_CHANWIDTH revive,sendch(%d)\n",__func__,mgmt->u.action.u.notify_chan_width.chan_width); 
-			if(mgmt->u.action.u.notify_chan_width.chan_width)
-			{
-				/*
-				*if not surport ht40, we should not receive this frame.
-				*/
-				spin_lock_bh(&hw_priv->spinlock_channel_type);
-				if(hw_priv->channel_type<=NL80211_CHAN_HT20)
-					printk("%s:in 20M mode,we can not recive this frame,what happend",__func__); 
-				spin_unlock_bh(&hw_priv->spinlock_channel_type);
-
-				atomic_set(&hw_priv->tx_20M_lock,0);
+			struct sta_info *sta;
+			rcu_read_lock();
+			sta = sta_info_get(vif_to_sdata(priv->vif), frame->addr2);
+			if(sta == NULL){
+				rcu_read_unlock();
+				goto drop;
+			}			
+			atbm_printk_always("[RX]:CHANWIDTH,sendch(%d)\n",mgmt->u.action.u.notify_chan_width.chan_width); 
+			if(mgmt->u.action.u.notify_chan_width.chan_width){
+				clear_sta_flag(sta,WLAN_STA_40M_CH_SEND_20M);
+			}else{
+				set_sta_flag(sta,WLAN_STA_40M_CH_SEND_20M);
 			}
-			else
-			{
-				atomic_set(&hw_priv->tx_20M_lock,1);
-			}
-			new_lock = !!atomic_read(&hw_priv->tx_20M_lock);
-			
-			if(prev_lock^new_lock)
-			{
-				set_bit(WSM_SET_CHANTYPECHANGE_FLAGS__CHANGE_PHY_CHTYPE,&hw_priv->change_bit);
-				atomic_add_return(1, &hw_priv->channel_chaging);
-				if(atbm_hw_priv_queue_delayed_work(hw_priv, &priv->chantype_change_work,0) <= 0)
-				{
-					printk("%s: queue chantype_change_work err\n",__func__);
-					if(atomic_sub_return(1, &hw_priv->channel_chaging)<=0)
-					{
-						printk("%s: channel_chaging value err\n",__func__);
-					}
-				}
-			}
-
+			rcu_read_unlock();
 			goto drop;
 		}
 	}
 #endif
-
+#ifdef CONFIG_ATBM_SUPPORT_SCHED_SCAN
 #ifdef ROAM_OFFLOAD
 	if ((ieee80211_is_beacon(frame->frame_control)||ieee80211_is_probe_resp(frame->frame_control)) &&
 			!arg->status ) {
@@ -2459,10 +2686,11 @@ extern void atbm_set_ap_info(Wifi_Recv_Info_t *infor);
 				atbm_dev_kfree_skb(hw_priv->beacon);
 			hw_priv->beacon = atbm_skb_copy(skb, GFP_ATOMIC);
 			if (!hw_priv->beacon)
-				printk("apollo: sched_scan: own beacon storing failed\n");
+				atbm_printk_err("apollo: sched_scan: own beacon storing failed\n");
 		}
 	}
 #endif /*ROAM_OFFLOAD*/
+#endif
 #ifdef CONFIG_PM
 
 	/* Stay awake for 1sec. after frame is received to give
@@ -2472,22 +2700,21 @@ extern void atbm_set_ap_info(Wifi_Recv_Info_t *infor);
 		grace_period = 5 * HZ;
 	else if (ieee80211_is_deauth(frame->frame_control))
 		grace_period = 5 * HZ;
-	else if(ieee80211_is_data(frame->frame_control))
-		grace_period = HZ/5;
 	else 
 		grace_period = 0;
-	if (ieee80211_is_data(frame->frame_control))
-		atbm_rx_h_ba_stat(priv, hdrlen, skb->len);
 	if(grace_period != 0)
 		atbm_pm_stay_awake(&hw_priv->pm_state, grace_period);
 #endif
-
+#ifdef CONFIG_ATBM_BA_STATUS
+	if (ieee80211_is_data(frame->frame_control))
+		atbm_rx_h_ba_stat(priv, hdrlen, skb->len);
+#endif
 #ifdef ATBM_PKG_REORDER
 	if(ieee80211_is_data_qos(frame->frame_control))
 	{
 		if((arg->link_id == 0)||(arg->link_id-1>=ATBM_APOLLO_LINK_ID_UNMAPPED))
 		{
-			printk("link_id err\n");
+			atbm_printk_err("link_id err\n");
 			goto direct_queue;
 		}
 		if(atbm_reorder_skb_queue(priv,skb,arg->link_id-1) == 0)
@@ -2508,22 +2735,34 @@ direct_queue:
 #endif
 
 	//atbm_skb_trim(skb, skb->len);
-
+#ifdef CONFIG_ATBM_SUPPORT_P2P
 #ifdef ATBM_P2P_CHANGE	
 	atbm_parase_p2p_action_frame(priv,skb,false);
 	atbm_parase_p2p_scan_resp(priv,skb);
 #endif
+#endif
+#ifdef CONFIG_ATBM_STA_LISTEN
+	if(priv->join_status == ATBM_APOLLO_JOIN_STATUS_STA_LISTEN){
+		hdr->flag |= RX_FLAG_STA_LISTEN;
+	}
+#endif
 	atbm_rx_udp(priv,skb);
 	if (unlikely(early_data)) {
+		#if 0
 		spin_lock_bh(&priv->ps_state_lock);
 		/* Double-check status with lock held */
-		if (entry->status == ATBM_APOLLO_LINK_SOFT)
-			atbm_skb_queue_tail(&entry->rx_queue, skb);
+		if (entry->status == ATBM_APOLLO_LINK_SOFT){
+			//flags |= RX_DEBUG_FLAG_SOFTLINK;
+			///atbm_skb_queue_tail(&entry->rx_queue, skb);
+			spin_unlock_bh(&priv->ps_state_lock);
+			return; 
+		}
 		else
-			ieee80211_rx_irqsafe(priv->hw, skb);
 		spin_unlock_bh(&priv->ps_state_lock);
+		#endif
+		atbm_ieee80211_rx(priv->hw, skb);
 	} else {
-		ieee80211_rx_irqsafe(priv->hw, skb);
+		atbm_ieee80211_rx(priv->hw, skb);
 			
 	}
 	*skb_p = NULL;
@@ -2578,6 +2817,7 @@ int atbm_upload_keys(struct atbm_vif *priv)
 		}
 	return ret;
 }
+#if 0
 /* Workaround for WFD test case 6.1.10 */
 void atbm_link_id_reset(struct work_struct *work)
 {
@@ -2594,3 +2834,4 @@ void atbm_link_id_reset(struct work_struct *work)
 		       &priv->link_id_work) <= 0)
 		wsm_unlock_tx(hw_priv);
 }
+#endif

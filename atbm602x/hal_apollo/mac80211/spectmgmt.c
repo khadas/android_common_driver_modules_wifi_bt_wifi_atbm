@@ -13,7 +13,7 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
-
+#ifdef CONFIG_ATBM_SPECTRUM_MGMT
 #include <linux/ieee80211.h>
 #include <net/cfg80211.h>
 #include <net/atbm_mac80211.h>
@@ -80,3 +80,4 @@ void ieee80211_process_measurement_req(struct ieee80211_sub_if_data *sdata,
 			mgmt->sa, mgmt->bssid,
 			mgmt->u.action.u.measurement.dialog_token);
 }
+#endif

@@ -336,7 +336,7 @@ int mesh_add_ds_params_ie(struct sk_buff *skb,
 		pos = atbm_skb_put(skb, 2 + 1);
 		*pos++ = ATBM_WLAN_EID_DS_PARAMS;
 		*pos++ = 1;
-		*pos++ = ieee80211_frequency_to_channel(chan_state->conf.channel->center_freq);
+		*pos++ = ieee80211_frequency_to_channel(channel_center_freq(chan_state->conf.channel));
 	}
 
 	return 0;
@@ -457,7 +457,7 @@ static void ieee80211_mesh_housekeeping(struct ieee80211_sub_if_data *sdata,
 	bool free_plinks;
 
 #ifdef CONFIG_MAC80211_ATBM_VERBOSE_DEBUG
-	printk(KERN_DEBUG "%s: running mesh housekeeping\n",
+	atbm_printk_debug( "%s: running mesh housekeeping\n",
 	       sdata->name);
 #endif
 

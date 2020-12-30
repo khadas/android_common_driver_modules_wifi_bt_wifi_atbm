@@ -263,11 +263,11 @@ int ieee80211_tkip_decrypt_data(struct crypto_cipher *tfm,
 #ifdef CONFIG_MAC80211_ATBM_TKIP_DEBUG
 	{
 		int i;
-		printk(KERN_DEBUG "TKIP decrypt: data(len=%zd)", payload_len);
+		atbm_printk_always( "TKIP decrypt: data(len=%zd)", payload_len);
 		for (i = 0; i < payload_len; i++)
-			printk(" %02x", payload[i]);
-		printk("\n");
-		printk(KERN_DEBUG "TKIP decrypt: iv16=%04x iv32=%08x\n",
+			atbm_printk_always(" %02x", payload[i]);
+		atbm_printk_always("\n");
+		atbm_printk_always("TKIP decrypt: iv16=%04x iv32=%08x\n",
 		       iv16, iv32);
 	}
 #endif
@@ -283,13 +283,13 @@ int ieee80211_tkip_decrypt_data(struct crypto_cipher *tfm,
 	     (iv32 == key->u.tkip.rx[queue].iv32 &&
 	      iv16 <= key->u.tkip.rx[queue].iv16))) {
 #ifdef CONFIG_MAC80211_ATBM_TKIP_DEBUG
-		printk(KERN_DEBUG "TKIP replay detected for RX frame from "
+		atbm_printk_debug( "TKIP replay detected for RX frame from "
 		       "%pM (RX IV (%08x,%04x) <= prev. IV (%08x,%04x)\n",
 		       ta,
 		       iv32, iv16, key->u.tkip.rx[queue].iv32,
 		       key->u.tkip.rx[queue].iv16);
 #endif
-		printk(KERN_DEBUG "tkip_decrypt_data,iv32(%d),iv16(%d),rx_iv32(%d),rx_iv16(%d)\n",iv32,iv16,key->u.tkip.rx[queue].iv32,key->u.tkip.rx[queue].iv16);
+		atbm_printk_debug("tkip_decrypt_data,iv32(%d),iv16(%d),rx_iv32(%d),rx_iv16(%d)\n",iv32,iv16,key->u.tkip.rx[queue].iv32,key->u.tkip.rx[queue].iv16);
 		return TKIP_DECRYPT_REPLAY;
 	}
 
@@ -307,16 +307,16 @@ int ieee80211_tkip_decrypt_data(struct crypto_cipher *tfm,
 		{
 			int i;
 			u8 key_offset = NL80211_TKIP_DATA_OFFSET_ENCR_KEY;
-			printk(KERN_DEBUG "TKIP decrypt: Phase1 TA=%pM"
+			atbm_printk_debug( "TKIP decrypt: Phase1 TA=%pM"
 			       " TK=", ta);
 			for (i = 0; i < 16; i++)
-				printk("%02x ",
+				atbm_printk_debug("%02x ",
 				       key->conf.key[key_offset + i]);
-			printk("\n");
-			printk(KERN_DEBUG "TKIP decrypt: P1K=");
+			atbm_printk_debug("\n");
+			atbm_printk_debug( "TKIP decrypt: P1K=");
 			for (i = 0; i < 5; i++)
-				printk("%04x ", key->u.tkip.rx[queue].p1k[i]);
-			printk("\n");
+				atbm_printk_debug("%04x ", key->u.tkip.rx[queue].p1k[i]);
+			atbm_printk_debug("\n");
 		}
 #endif
 	}
@@ -337,10 +337,10 @@ int ieee80211_tkip_decrypt_data(struct crypto_cipher *tfm,
 #ifdef CONFIG_MAC80211_ATBM_TKIP_DEBUG
 	{
 		int i;
-		printk(KERN_DEBUG "TKIP decrypt: Phase2 rc4key=");
+		atbm_printk_debug( "TKIP decrypt: Phase2 rc4key=");
 		for (i = 0; i < 16; i++)
-			printk("%02x ", rc4key[i]);
-		printk("\n");
+			atbm_printk_debug("%02x ", rc4key[i]);
+		atbm_printk_debug("\n");
 	}
 #endif
 

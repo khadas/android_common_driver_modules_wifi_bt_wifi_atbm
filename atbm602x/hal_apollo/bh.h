@@ -17,7 +17,7 @@
 
 /* extern */ struct atbm_common;
 
-#define SDIO_BLOCK_SIZE 288
+#define SDIO_BLOCK_SIZE 256
 
 /* Suspend state privates */
 enum atbm_bh_pm_state {
@@ -25,6 +25,14 @@ enum atbm_bh_pm_state {
         ATBM_APOLLO_BH_SUSPEND,
         ATBM_APOLLO_BH_SUSPENDED,
         ATBM_APOLLO_BH_RESUME,
+};
+enum atbm_rx_frame_type{
+	ATBM_RX_RAW_FRAME = 1,
+	ATBM_RX_DERICTLY_DATA_FRAME,
+	ATBM_RX_SLOW_MGMT_FRAME,
+	ATBM_RX_WSM_CMD_FRAME,
+	ATBM_RX_WSM_DATA_FRAME,
+	ATBM_RX_WSM_FREE,
 };
 #include "bh_usb.h"
 
@@ -91,8 +99,8 @@ static inline bool atbm_cancle_delayed_work(struct delayed_work *dwork,bool sync
 	return retval;
 }
 #ifdef CONFIG_PM
-#define atbm_hold_suspend(__hw_priv)		atbm_pm_stay_awake_lock(&((__hw_priv)->pm_state))
-#define atbm_release_suspend(__hw_priv)		atbm_pm_stay_awake_unlock(&((__hw_priv)->pm_state))
+#define atbm_hold_suspend(__hw_priv)		BUG_ON(__hw_priv==NULL)
+#define atbm_release_suspend(__hw_priv)		BUG_ON(__hw_priv==NULL)
 #else
 #define atbm_hold_suspend(__hw_priv)		BUG_ON(__hw_priv==NULL)
 #define atbm_release_suspend(__hw_priv)		BUG_ON(__hw_priv==NULL)
@@ -106,5 +114,25 @@ static inline bool atbm_cancle_delayed_work(struct delayed_work *dwork,bool sync
 	if(_awake == true)	atbm_release_suspend(_hw_priv);								\
 	ret_timeout;																	\
 })
+static inline void atbm_ieee80211_rx(struct ieee80211_hw	*hw,struct sk_buff *skb)
+{
+#ifdef IEEE80211_TASKLET
+	ieee80211_rx_irqsafe(hw,skb);	
+#else	
+	if(skb->pkt_type == ATBM_RX_DERICTLY_DATA_FRAME){
+		ieee80211_rx_irqsafe(hw,skb);
+	}else if(softirq_count() == 0){
+		skb->pkt_type = 0;
+		ieee80211_rx_ni(hw,skb);
+	}else  {
+		skb->pkt_type = 0;
+		ieee80211_rx(hw,skb);
+	}
+#endif
+}
 
+static inline void atbm_ieee80211_tx_status(struct ieee80211_hw	*hw,struct sk_buff *skb)
+{
+	ieee80211_tx_status_ni(hw,skb);
+}
 #endif /* ATBM_APOLLO_BH_H */

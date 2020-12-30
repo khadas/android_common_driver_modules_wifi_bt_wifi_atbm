@@ -8,7 +8,7 @@
 
 #ifndef TKIP_H
 #define TKIP_H
-
+#ifdef CONFIG_ATBM_USE_SW_ENC
 #include <linux/types.h>
 #include <linux/crypto.h>
 #include "key.h"
@@ -31,5 +31,5 @@ int ieee80211_tkip_decrypt_data(struct crypto_cipher *tfm,
 				u8 *payload, size_t payload_len, u8 *ta,
 				u8 *ra, int only_iv, int queue,
 				u32 *out_iv32, u16 *out_iv16);
-
+#endif
 #endif /* TKIP_H */

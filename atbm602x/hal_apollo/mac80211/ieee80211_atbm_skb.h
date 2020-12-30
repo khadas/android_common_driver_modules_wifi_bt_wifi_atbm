@@ -1,6 +1,6 @@
 #ifndef _IEEE80211_ATBM_SKB_H_
 #define _IEEE80211_ATBM_SKB_H_
-#if (ATBM_ALLOC_SKB_DEBUG==1)
+#if defined (ATBM_ALLOC_SKB_DEBUG)
 extern void ieee80211_atbm_add_skb_to_debug_list(struct sk_buff *skb,const char *func);
 
 extern void ieee80211_atbm_skb_exit(void);
@@ -71,15 +71,31 @@ extern int ieee80211_atbm_skb_shared(const struct sk_buff *skb);
 extern int ieee80211_atbm_skb_padto(struct sk_buff *skb, unsigned int len);
 extern int ieee80211_atbm_netif_rx(struct sk_buff *skb);
 extern struct sk_buff *ieee80211_atbm_skb_get(struct sk_buff *skb);
+extern void ieee80211_atbm_rx_debug_setflag(struct sk_buff *skb,u32 flags);
+extern void ieee80211_atbm_rx_debug_setflag2(struct sk_buff *skb,u16 fc);
+extern void ieee80211_atbm_amsdu_to_8023s(struct sk_buff *skb, struct sk_buff_head *list,
+			      const u8 *addr, enum nl80211_iftype iftype,
+			      const unsigned int extra_headroom,
+			      bool has_80211_header);
+extern void ieee80211_atbm_skb_orphan(struct sk_buff *skb,const char *func);
 
-struct ieee80211_atbm_skb_hdr
-{
-	struct list_head head;
-	const char *call_addr;
-	long masker;
-};
 
-#define IEEE80211_ATBM_SKB_HEAD_SIZE sizeof(struct ieee80211_atbm_skb_hdr)
+#define RX_DEBUG_FLAG_MAC   BIT(1)
+#define RX_DEBUG_FLAG_HAL   BIT(0)
+#define RX_DEBUG_FLAG_MULTI   BIT(2)
+#define RX_DEBUG_FLAG_DATA   BIT(3)
+#define RX_DEBUG_FLAG_AP   BIT(4)
+#define RX_DEBUG_FLAG_SOFTLINK   BIT(5)
+#define RX_DEBUG_FLAG_IRQRXMAC   BIT(6)
+#define RX_DEBUG_FLAG_MAC_RX1   BIT(7)
+#define RX_DEBUG_FLAG_MAC_RX2   BIT(8)
+#define RX_DEBUG_FLAG_MAC_RX3   BIT(9)
+#define RX_DEBUG_FLAG_MAC_RX4   BIT(10)
+#define RX_DEBUG_FLAG_CTRL   BIT(11)
+#define RX_DEBUG_FLAG_WORK   BIT(12)
+#define RX_DEBUG_FLAG_ADDWORK   BIT(13)
+
+#define IEEE80211_ATBM_SKB_HEAD_SIZE 0
 #define __atbm_dev_alloc_skb(_length,_gfp_mask) 				__ieee80211_atbm_dev_alloc_skb(_length,_gfp_mask,__func__)																														
 #define atbm_dev_alloc_skb(_length)								ieee80211_atbm_dev_alloc_skb(_length,__func__)              																														    
 #define atbm_alloc_skb(_size,_priority) 						ieee80211_atbm_alloc_skb(_size,_priority,__func__)      																														
@@ -133,6 +149,11 @@ struct ieee80211_atbm_skb_hdr
 #define atbm_skb_padto(_skb,_len)  								ieee80211_atbm_skb_padto(_skb,_len)
 #define atbm_skb_tx_debug(_skb)									ieee80211_atbm_add_skb_to_debug_list(_skb,__func__)
 #define atbm_skb_get(_skb)										ieee80211_atbm_skb_get(_skb)
+#define atbm_skb_rx_debug(_skb,_f)								ieee80211_atbm_rx_debug_setflag(_skb,_f)
+#define atbm_skb_rx_debug2(_skb,_fc)							ieee80211_atbm_rx_debug_setflag2(_skb,_fc)
+#define atbm_amsdu_to_8023s(_skb, _list,_addr,_iftype,_extra_headroom)		\
+		ieee80211_atbm_amsdu_to_8023s(_skb, _list,_addr,_iftype,_extra_headroom,true)
+#define atbm_skb_orphan(_skb)									ieee80211_atbm_skb_orphan(_skb,__func__)
 #else
 #define __atbm_dev_alloc_skb(_length,_gfp_mask) 				__dev_alloc_skb(_length,_gfp_mask)																														
 #define atbm_dev_alloc_skb(_length)								dev_alloc_skb(_length)              																														    
@@ -185,11 +206,21 @@ struct ieee80211_atbm_skb_hdr
 #define atbm_skb_shared(_skb)									skb_shared(_skb)
 #define atbm_skb_padto(_skb,_len)  								skb_padto(_skb,_len)
 #define atbm_skb_get(_skb)										skb_get(_skb)
+#define atbm_skb_orphan(_skb)									skb_orphan(_skb)
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 7, 0))
+#define atbm_amsdu_to_8023s(_skb, _list,_addr,_iftype,_extra_headroom)		\
+		ieee80211_amsdu_to_8023s(_skb, _list,_addr,_iftype,_extra_headroom,true)
+#else
+#define atbm_amsdu_to_8023s(_skb, _list,_addr,_iftype,_extra_headroom)		\
+		ieee80211_amsdu_to_8023s(_skb, _list,_addr,_iftype,_extra_headroom,NULL,NULL)
+#endif
 #define atbm_skb_tx_debug(_skb)
 #define ieee80211_atbm_skb_exit()
 #define ieee80211_atbm_skb_int()
 #define IEEE80211_ATBM_SKB_HEAD_SIZE 0
+#define atbm_skb_rx_debug(_skb,_f)
+#define atbm_skb_rx_debug2(_skb,_fc)
 
 #endif
 
