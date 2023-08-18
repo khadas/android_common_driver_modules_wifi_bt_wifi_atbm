@@ -1656,6 +1656,17 @@ static void ieee80211_tx_timeout(struct net_device *dev)
 	ieee80211_queue_work(&local->hw, &sdata->work);
 }
 #endif
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
+static int ieee80211_netdev_siocdevprivate(struct net_device *dev, struct ifreq *ifr,
+			      void __user *data, int cmd)
+{
+	/* handle cmd(s) between SIOCDEVPRIVATE and SIOCDEVPRIVATE + 15 */
+
+	return ieee80211_netdev_ioctrl(dev, ifr, cmd);
+}
+#endif
+
 static const struct net_device_ops ieee80211_dataif_ops = {
 	.ndo_open		= ieee80211_open,
 	.ndo_stop		= ieee80211_stop,
@@ -1669,6 +1680,9 @@ static const struct net_device_ops ieee80211_dataif_ops = {
 	.ndo_select_queue	= ieee80211_netdev_select_queue,
 #if defined(CONFIG_ATBM_IOCTRL)
 	.ndo_do_ioctl = ieee80211_netdev_ioctrl,
+#endif
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
+	.ndo_siocdevprivate = ieee80211_netdev_siocdevprivate,
 #endif
 #ifdef CONFIG_ATBM_SUPPORT_NET_TIMEOUT
 	.ndo_tx_timeout = ieee80211_tx_timeout,
@@ -1743,6 +1757,9 @@ static const struct net_device_ops ieee80211_monitorif_ops = {
 	.ndo_select_queue	= ieee80211_monitor_select_queue,
 #if defined(CONFIG_ATBM_IOCTRL)
 	.ndo_do_ioctl = ieee80211_netdev_ioctrl,
+#endif
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
+	.ndo_siocdevprivate = ieee80211_netdev_siocdevprivate,
 #endif
 };
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 0))
