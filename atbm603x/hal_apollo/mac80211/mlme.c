@@ -30,6 +30,10 @@
 #include <linux/kthread.h>
 
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 41) && defined (CONFIG_AMLOGIC_KERNEL_VERSION))
+#include <linux/upstream_version.h>
+#endif
+
 
 #include "ieee80211_i.h"
 #include "driver-ops.h"
@@ -1745,10 +1749,13 @@ static void ieee80211_mgd_enable_netq(struct ieee80211_sub_if_data *sdata,size_t
 	*500ms is long enough to wait the txq ready
 	*/
 	do{
-		
+#if ((defined (AML_KERNEL_VERSION) && AML_KERNEL_VERSION >= 15) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+		atbm_printk_err("");
+#else
 		if(!qdisc_tx_is_noop(sdata->dev)){
 			break;
 		}
+#endif
 
 		if(wait >= waitting_max){
 			break;
@@ -1778,9 +1785,13 @@ bool ieee80211_wk_netq_ready(struct ieee80211_sub_if_data *sdata)
 	struct ieee80211_work *wk;
 	struct ieee80211_channel_state *chan_state = ieee80211_get_channel_state(sdata->local, sdata);
 
+#if ((defined (AML_KERNEL_VERSION) && AML_KERNEL_VERSION >= 15) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+	atbm_printk_err("");
+#else
 	if(!qdisc_tx_is_noop(sdata->dev)){
 		return true;
 	}
+#endif
 	
 	wk = atbm_kzalloc(sizeof(struct ieee80211_work), GFP_KERNEL);
 
@@ -1798,10 +1809,14 @@ bool ieee80211_wk_netq_ready(struct ieee80211_sub_if_data *sdata)
 		memcpy(wk->filter_sa,sdata->u.mgd.bssid,6);
 		ieee80211_add_work(wk);
 		ieee80211_work_purge(sdata,sdata->u.mgd.bssid,IEEE80211_WORK_NETQ,true);
-		
+
+#if ((defined (AML_KERNEL_VERSION) && AML_KERNEL_VERSION >= 15) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+		atbm_printk_err("");
+#else
 		if(!qdisc_tx_is_noop(sdata->dev)){
 			return true;
 		}
+#endif
 
 		return false;
 	} 

@@ -97,6 +97,8 @@ all:modules
 modules:
 	@echo "make PLATFORM_CROSS=$(platform)"
 	@echo "make ARCH=$(ARCH)"
+	@echo "make OUT_DIR=$(OUT_DIR)"
+	rm -vrf $(OUT_DIR)/$(M)
 	$(MAKE) all ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) -C $(KDIR) SYS=$(sys) PLAT=$(platform) modules
 
 modules_install:

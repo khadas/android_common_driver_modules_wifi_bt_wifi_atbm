@@ -1828,10 +1828,12 @@ int access_file(char *path, char *buffer, int size, int isRead)
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 8, 0))
 	mm_segment_t old_fs = get_fs();
 #endif
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0))
 	if(isRead)
 		fp = filp_open(path,O_RDONLY,S_IRUSR);
 	else
 		fp = filp_open(path,O_CREAT|O_WRONLY,S_IRUSR);
+#endif
 
 	if (IS_ERR(fp)) {
 		atbm_printk_err("apollo wifi : can't open %s\n",path);
@@ -1852,6 +1854,7 @@ int access_file(char *path, char *buffer, int size, int isRead)
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 8, 0))
 			set_fs(KERNEL_DS);
 #endif
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0))
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 0))
 			ret = kernel_read(fp,buffer,size,&fp->f_pos);
 #elif (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 84))
@@ -1861,6 +1864,7 @@ int access_file(char *path, char *buffer, int size, int isRead)
 			ret = kernel_read(fp,&fp->f_pos,buffer,size);
 #else
 			ret = vfs_read(fp,buffer,size,&fp->f_pos);
+#endif
 #endif
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 8, 0))
 			set_fs(old_fs);
@@ -1878,6 +1882,7 @@ int access_file(char *path, char *buffer, int size, int isRead)
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 8, 0))
 			set_fs(KERNEL_DS);
 #endif
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0))
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 0))
 			ret = kernel_write(fp,buffer,size,&fp->f_pos);
 #elif (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 84))
@@ -1887,6 +1892,7 @@ int access_file(char *path, char *buffer, int size, int isRead)
 			ret = kernel_write(fp,&fp->f_pos,buffer,size);
 #else
 			ret = vfs_write(fp,buffer,size,&fp->f_pos);
+#endif
 #endif
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 8, 0))
 			set_fs(old_fs);
