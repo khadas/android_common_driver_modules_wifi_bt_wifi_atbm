@@ -5955,6 +5955,7 @@ static int atbm_ioctl_set_txpwr_by_file(struct net_device *dev, struct iw_reques
 	int gngain[3]={0};
 	
 	//use delta_gain and dcxo value in config file,when file is exist
+#ifdef CUSTOM_FEATURE_MAC
 	if(access_file(STR_FILE,readbuf,sizeof(readbuf),1) > 0)
 	{
 		atbm_printk_init("param:%s",readbuf);
@@ -5970,6 +5971,7 @@ static int atbm_ioctl_set_txpwr_by_file(struct net_device *dev, struct iw_reques
 			atbm_printk_err("write mib failed(%d). \n", ret);
 		}
 	}
+#endif
 
 	return ret;
 }

@@ -2,17 +2,17 @@
 #CONFIG_USB_AGGR_URB_TX
 #CONFIG_TX_NO_CONFIRM
 #
-# ��������ѡ��ͬ��ģʽ��CONFIG_USB_AGGR_URB_TX ������ʱһ����Ҫ����CONFIG_USE_DMA_ADDR_BUFFER
-# 1> CONFIG_USB_AGGR_URB_TX + CONFIG_TX_NO_CONFIRM��ÿ��urb ���Ͷ��txframe ���Ҳ���Ҫconfirm����Ҫ��lmac��NO_NEED_CONFIRM �꣬����ratecontrol��lmac ʵ��
-# 2> CONFIG_USB_AGGR_URB_TX ÿ��urb ���Ͷ��txframe ������Ҫconfirm����Ҫ�ر�lmac��NO_NEED_CONFIRM ��
-# 3> ���к궼�����壬ÿ��urb ����һ��txframe ������Ҫconfirm������urbֱ��ʹ��skbbuffer����Ҫ�ر�lmac��NO_NEED_CONFIRM ��
-# 4> ����CONFIG_USE_DMA_ADDR_BUFFER��ÿ��urb ����һ��txframe ������Ҫconfirm������urbֱ��DMAbuffer����Ҫ�����ݴ�skb copy��DMAbuffer����Ҫ�ر�lmac��NO_NEED_CONFIRM �꣬
-# 5> ����CONFIG_USE_DMA_ADDR_BUFFER+ CONFIG_TX_NO_CONFIRM��ÿ��urb ����һ��txframe ���Ҳ���Ҫconfirm������urbֱ��DMAbuffer����Ҫ�����ݴ�skb copy��DMAbuffer����Ҫ��lmac��NO_NEED_CONFIRM �꣬����ratecontrol��lmac ʵ��
-# 6> ����CONFIG_TX_NO_CONFIRM��ÿ��urb ����һ��txframe ���Ҳ���Ҫconfirm������urbֱ��ʹ��skbbuffer����Ҫ��lmac��NO_NEED_CONFIRM �꣬����ratecontrol��lmac ʵ��
+# 可以用来选择不同是模式，CONFIG_USB_AGGR_URB_TX 定义上时一定需要定义CONFIG_USE_DMA_ADDR_BUFFER
+# 1> CONFIG_USB_AGGR_URB_TX + CONFIG_TX_NO_CONFIRM，每个urb 发送多个txframe 并且不需要confirm，需要打开lmac的NO_NEED_CONFIRM 宏，并且ratecontrol在lmac 实现
+# 2> CONFIG_USB_AGGR_URB_TX 每个urb 发送多个txframe 并且需要confirm，需要关闭lmac的NO_NEED_CONFIRM 宏
+# 3> 所有宏都不定义，每个urb 发送一个txframe 并且需要confirm，并且urb直接使用skbbuffer，需要关闭lmac的NO_NEED_CONFIRM 宏
+# 4> 定义CONFIG_USE_DMA_ADDR_BUFFER，每个urb 发送一个txframe 并且需要confirm，并且urb直接DMAbuffer，需要把数据从skb copy到DMAbuffer，需要关闭lmac的NO_NEED_CONFIRM 宏，
+# 5> 定义CONFIG_USE_DMA_ADDR_BUFFER+ CONFIG_TX_NO_CONFIRM，每个urb 发送一个txframe 并且不需要confirm，并且urb直接DMAbuffer，需要把数据从skb copy到DMAbuffer，需要开lmac的NO_NEED_CONFIRM 宏，并且ratecontrol在lmac 实现
+# 6> 定义CONFIG_TX_NO_CONFIRM，每个urb 发送一个txframe 并且不需要confirm，并且urb直接使用skbbuffer，需要打开lmac的NO_NEED_CONFIRM 宏，并且ratecontrol在lmac 实现
 #
-##���ڵ�����+cpuǿ�İ���ʹ�� ģʽ1 ���� ģʽ2
-##���ڵ��ȿ�+cpu���İ���ʹ�� ģʽ3 ���� ģʽ6
-## Ĭ��ʹ��ģʽ 3
+##对于调度慢+cpu强的板子使用 模式1 或者 模式2
+##对于调度快+cpu慢的板子使用 模式3 或者 模式6
+## 默认使用模式 3
 #####################################################################################################################################################################################################################
 
 ifneq ($(ATBM_BUILD_IN_KERNEL),y)
@@ -141,7 +141,7 @@ endif
 endif
 MULT_NAME=y
 
-#export 
+#export
 ifeq ($(CONFIG_ATBM_APOLLO),)
 CONFIG_ATBM_APOLLO=m
 endif
@@ -170,7 +170,7 @@ endif
 #ccflags-y  += -I$(shell pwd)/../include/ \
         -include $(shell pwd)/../include/linux/compat-2.6.h \
         -DCOMPAT_STATIC
-##ָ�������ļ�·�����������ļ�����ʱʹ�������ļ��е�dcxoֵ��ʹ��efuse�е�dcxo�������ļ��е�delta_gainΪ����ֵ������ļ���������ֱ��ʹ��efuse�е�����
+##指定配置文件路径，当配置文件存在时使用配置文件中的dcxo值不使用efuse中的dcxo，配置文件中的delta_gain为修正值，如果文件不存在则直接使用efuse中的数据
 ATBM_BUILD_TIME = $(shell date "+%Y-%m-%d_%H:%M:%S")
 ccflags-y += -DCONFIG_ATBM_BUILD_TIME=\"$(ATBM_BUILD_TIME)\"
 
@@ -243,7 +243,7 @@ ccflags-y += -DEXIT_MODULE_RESET_USB=1
 ccflags-y += -DATBM_VIF_LIST_USE_RCU_LOCK
 ccflags-y += -DCONFIG_ATBM_ETF_OLD
 ccflags-y += -DCONFIG_ATBM_SUPPORT_REKEY
-#ccflags-y += -DATBM_SUPPORT_SMARTCONFIG 
+#ccflags-y += -DATBM_SUPPORT_SMARTCONFIG
 #ccflags-y += -DIEEE80211_TASKLET
 #ccflags-y += -DCONFIG_RATE_HW_CONTROL
 ccflags-y += -DCONFIG_ATBM_SUPPORT_SG
@@ -323,8 +323,8 @@ ccflags-$(MONHDRPRISM) += -DCONFIG_ATBM_MONITOR_HDR_PRISM
 ###################################################################
 ccflags-$(DRVLOADERFAST) += -DCONDIF_ATBM_CTRL_REQUEST_ASYNC
 ###################################################################
-#private protocl 
-################################################################### 
+#private protocl
+###################################################################
 ccflags-$(PRI_IE) += -DATBM_PRIVATE_IE
 #ifneq ($(PRI_IE),y)
 ccflags-y += -DCONFIG_ATBM_STA_LISTEN
@@ -372,13 +372,13 @@ ccflags-$(MONITOR) += -DATBM_SUPPORT_PKG_MONITOR
 ####################################################################
 ccflags-$(BRIDGE) += -DCONFIG_MAC80211_BRIDGE
 ####################################################################
-#CONFIG_TX_NO_CONFIRM      
+#CONFIG_TX_NO_CONFIRM
 #enable tx noconfirm
 ####################################################################
 ccflags-$(NOTXCONFIRM) += -DCONFIG_TX_NO_CONFIRM
 ####################################################################
 #CONFIG_USB_AGGR_URB_TX
-#enable usb aggr tx 
+#enable usb aggr tx
 ####################################################################
 ccflags-$(USBAGGTX) += -DCONFIG_USB_AGGR_URB_TX
 ####################################################################
@@ -430,7 +430,7 @@ ccflags-$(MODULEFS) += -DCONFIG_ATBM_MOULE_FS
 #CONFIG_ATBM_DEV_IOCTL
 #enabel dev ioctl
 ####################################################################
-ccflags-$(DEVCTRL) += -DCONFIG_ATBM_DEV_IOCTL 
+ccflags-$(DEVCTRL) += -DCONFIG_ATBM_DEV_IOCTL
 ####################################################################
 #ATBM_SUPPORT_SMARTCONFIG
 #enabel smart config
@@ -477,7 +477,7 @@ ccflags-y += -DATBM_PRODUCT_TEST_USE_FEATURE_ID
 #ccflags-y += -DCONFIG_ATBM_APOLLO_ITP
 #ccflags-y += -DCONFIG_ATBM_APOLLO_TESTMODE
 # use the mac addr in file :"/data/.mac.info"
-ccflags-y += -DCUSTOM_FEATURE_MAC
+#ccflags-y += -DCUSTOM_FEATURE_MAC
 #ccflags-y += -DTEST_RF_POWER
 #ccflags-y += -DUSB_CMD_UES_EP0
 #ccflags-y += -DRESET_CHANGE
@@ -658,7 +658,7 @@ ifeq ($(SPI_BUS),y)
 ccflags-y += -DSPI_BUS
 endif
 #ccflags-y += -DPS_SETUP
-MODFLAGS =-DMODULE -fno-pic 
+MODFLAGS =-DMODULE -fno-pic
 CFLAGS_MODULE =$(MODFLAGS)
 
 ifeq ($(CONFIG_ATBM_APOLLO_DEBUGFS),y)
@@ -797,4 +797,5 @@ obj-$(CONFIG_ATBM_APOLLO) += $(ATBM_MODULES_NAME).o
 ccflags-y += -D__CHECK_ENDIAN__
 MODFLAGS =-DMODULE -fno-pic
 CFLAGS_MODULE =$(MODFLAGS)
+
 

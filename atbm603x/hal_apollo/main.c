@@ -1392,7 +1392,8 @@ int get_rate_delta_gain(s8 *dst)
 		atbm_printk_err("Invalid parameter,file == NULL\n");
 		return -1;
 	}
-	
+
+#ifdef CUSTOM_FEATURE_MAC
 	if((readnum = access_file(file,readbuf,sizeof(readbuf),1)) > 0)
 	{
 		pdata[count] = readbuf;
@@ -1401,7 +1402,7 @@ int get_rate_delta_gain(s8 *dst)
 		for(i = 0;i < readnum;i++)
 		{
 			if((readbuf[i]=='\n') && (count<=22))
-			{	
+			{
 				if(readnum != (i+1)){
 					pdata[count] = readbuf+i+1;
 					count++;
@@ -1417,17 +1418,15 @@ int get_rate_delta_gain(s8 *dst)
 				pstr=strchr(pdata[i],'=');
 				if(pstr)
 				{
-				
 					sscanf(pstr,"=%d",&val);
 					dst[i] = val;
 					//atbm_printk_err("%d,%s\n",i,pstr);
 					pstr = NULL;
 				}
 			}
-				
 		}
 	}
-		
+#endif
 	return 0;
 }
 void atbm_get_delta_gain(char *srcData,int *allgain,int *bgain,int *gngain)
@@ -1491,6 +1490,7 @@ int atbm_core_probe(const struct sbus_ops *sbus_ops,
 	char buffer[2];
     savedpsm = mode.power_mode;
 	FUNC_ENTER();
+#ifdef CUSTOM_FEATURE_MAC
 	if(access_file(PATH_WIFI_PSM_INFO,buffer,2,1) > 0) {
 		if(buffer[0] == 0x30) {
 			mode.power_mode = wsm_power_mode_active;
@@ -1507,6 +1507,7 @@ int atbm_core_probe(const struct sbus_ops *sbus_ops,
 	else {
 		atbm_printk_init("apollo wifi : Using default PSM %d\n",mode.power_mode);
 	}
+#endif
 #endif
 
 	dev = atbm_init_common(sizeof(struct atbm_common));
@@ -1620,6 +1621,7 @@ reload_fw:
 	}
 	atbm_set_fw_ver(hw_priv);
 	atbm_get_mac_address(hw_priv);
+#ifdef CUSTOM_FEATURE_MAC
 	if (efuse)
 	{
 		char buffer[15];
@@ -1632,6 +1634,7 @@ reload_fw:
 			atbm_printk_init("apollo wifi : Set efuse data\n");
 		}
 	}
+#endif
 	{
 		struct efuse_headr efuse_data;
 		err = wsm_get_efuse_data(hw_priv, (void *)&efuse_data, sizeof(efuse_data));
@@ -1653,15 +1656,15 @@ reload_fw:
 
 		memcpy(&atbm_6012B_band,&atbm_band_2ghz,sizeof(struct ieee80211_supported_band));
 		hw_priv->hw->wiphy->bands[IEEE80211_BAND_2GHZ] = &atbm_6012B_band;
-		hw_priv->hw->wiphy->bands[IEEE80211_BAND_2GHZ]->ht_cap.cap = 
-				  IEEE80211_HT_CAP_GRN_FLD 
-				| IEEE80211_HT_CAP_SGI_20	
+		hw_priv->hw->wiphy->bands[IEEE80211_BAND_2GHZ]->ht_cap.cap =
+				  IEEE80211_HT_CAP_GRN_FLD
+				| IEEE80211_HT_CAP_SGI_20
 				| (1 << IEEE80211_HT_CAP_RX_STBC_SHIFT);
 		atbm_printk_init("chip is 6012B not support HT40! \n");
 	}else{
 		hw_priv->hw->wiphy->bands[IEEE80211_BAND_2GHZ] = &atbm_band_2ghz;
 	}
-	
+
 	//use delta_gain and dcxo value in config file,when file is exist
 	//if(hw_priv->chip_version >= ARES_B){
 #ifdef CONFIG_ATBM_GET_GPIO4
@@ -1669,6 +1672,7 @@ reload_fw:
 		gpio4 = Atbm_Input_Value_Gpio(hw_priv,4);//choose gpio you want
 #endif
 		if(strfilename && gpio4){
+#ifdef CUSTOM_FEATURE_MAC
 			if(access_file(strfilename,readbuf,sizeof(readbuf),1) > 0)
 			{
 				atbm_printk_init("param:%s",readbuf);
@@ -1676,13 +1680,14 @@ reload_fw:
 				memset(readbuf, 0, sizeof(readbuf));
 				sprintf(readbuf, "set_txpwr_and_dcxo,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d ",deltagain[0], deltagain[1], deltagain[2], deltagain[3],
 					bgain[0], bgain[1], bgain[2],gngain[0], gngain[1], gngain[2]);
-				
+
 				atbm_printk_init("cmd: %s\n", readbuf);
 				err = wsm_write_mib(hw_priv, WSM_MIB_ID_FW_CMD, readbuf, strlen(readbuf), if_id);
 				if(err < 0){
 					atbm_printk_err("write mib failed(%d). \n", err);
 				}
 			}
+#endif
 		}
 	//}
 	{
@@ -1828,12 +1833,10 @@ int access_file(char *path, char *buffer, int size, int isRead)
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 8, 0))
 	mm_segment_t old_fs = get_fs();
 #endif
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0))
 	if(isRead)
 		fp = filp_open(path,O_RDONLY,S_IRUSR);
 	else
 		fp = filp_open(path,O_CREAT|O_WRONLY,S_IRUSR);
-#endif
 
 	if (IS_ERR(fp)) {
 		atbm_printk_err("apollo wifi : can't open %s\n",path);
@@ -1847,14 +1850,13 @@ int access_file(char *path, char *buffer, int size, int isRead)
 			atbm_printk_err("apollo wifi : Not allow to read\n");
 			return -2;
 		}
-		else 
+		else
 #endif
 		{
 			fp->f_pos = 0;
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 8, 0))
 			set_fs(KERNEL_DS);
 #endif
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0))
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 0))
 			ret = kernel_read(fp,buffer,size,&fp->f_pos);
 #elif (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 84))
@@ -1864,7 +1866,6 @@ int access_file(char *path, char *buffer, int size, int isRead)
 			ret = kernel_read(fp,&fp->f_pos,buffer,size);
 #else
 			ret = vfs_read(fp,buffer,size,&fp->f_pos);
-#endif
 #endif
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 8, 0))
 			set_fs(old_fs);
@@ -1882,7 +1883,6 @@ int access_file(char *path, char *buffer, int size, int isRead)
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 8, 0))
 			set_fs(KERNEL_DS);
 #endif
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0))
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 0))
 			ret = kernel_write(fp,buffer,size,&fp->f_pos);
 #elif (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 84))
@@ -1892,7 +1892,6 @@ int access_file(char *path, char *buffer, int size, int isRead)
 			ret = kernel_write(fp,&fp->f_pos,buffer,size);
 #else
 			ret = vfs_write(fp,buffer,size,&fp->f_pos);
-#endif
 #endif
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 8, 0))
 			set_fs(old_fs);
