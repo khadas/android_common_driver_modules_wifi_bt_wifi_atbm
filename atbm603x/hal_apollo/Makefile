@@ -34,7 +34,8 @@ KBUILD_CFLAGS += -Wno-error \
 	-Wno-error=unused-function \
 	-Wno-implicit-function-declaration \
 	-Wno-incompatible-function-pointer-types \
-	-Wno-incompatible-pointer-types-discards-qualifiers
+	-Wno-incompatible-pointer-types-discards-qualifiers \
+	-Wno-incompatible-pointer-types
 
 #export
 ifeq ($(CONFIG_ATBM_MODULE_NAME),)

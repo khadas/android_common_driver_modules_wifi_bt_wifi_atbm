@@ -50,7 +50,7 @@ static struct net_device *
 #else
 static int
 #endif
-ieee80211_add_iface(struct wiphy *wiphy, 
+ieee80211_add_iface(struct wiphy *wiphy,
 				#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,7,0))
 					const char *name,
 				#else
@@ -73,31 +73,31 @@ ieee80211_add_iface(struct wiphy *wiphy,
 #if (LINUX_VERSION_CODE > KERNEL_VERSION(4, 14, 0))
 	u32 *flags = params ? &params->flags : NULL ;
 #endif
-	
-	list_for_each_entry_rcu(sdata, &local->interfaces, list){
-		
-		 if (sdata->vif.type != NL80211_IFTYPE_MONITOR){
-		 	interface_cnt++;
-		 }else if(!(sdata->u.mntr_flags & MONITOR_FLAG_COOK_FRAMES)){
-		 	interface_cnt++;
+
+	list_for_each_entry_rcu(sdata, &local->interfaces, list) {
+
+		 if (sdata->vif.type != NL80211_IFTYPE_MONITOR) {
+			interface_cnt++;
+		 } else if (!(sdata->u.mntr_flags & MONITOR_FLAG_COOK_FRAMES)) {
+			interface_cnt++;
 		 }
 	}
 	atbm_printk_init("add iftype(%d),if_cnt(%d),flags(%p)\n",type,interface_cnt,flags);
-	if(interface_cnt>=2){
-		if(type != NL80211_IFTYPE_MONITOR){
+	if (interface_cnt >= 2) {
+		if (type != NL80211_IFTYPE_MONITOR) {
 			err = -ENOMEM;
 			atbm_printk_err("cannot add interface type(%d)\n",type);
 			return ERR_PTR(err);
 		}
 
-		if(!flags || !(*flags & MONITOR_FLAG_COOK_FRAMES)){
+		if (!flags || !(*flags & MONITOR_FLAG_COOK_FRAMES)) {
 			err = -ENOMEM;
 			atbm_printk_err("cannot add interface monitor\n");
 			return ERR_PTR(err);
 		}
 	}
-	if(local->only_monitors){
-		if(local->monitor_sdata){
+	if (local->only_monitors) {
+		if (local->monitor_sdata) {
 			atbm_printk_err("[%s] in monitor mode,so can not add sdata\n",local->monitor_sdata->name);
 		}
 		err = -ENOMEM;
@@ -111,7 +111,7 @@ ieee80211_add_iface(struct wiphy *wiphy,
 		sdata = IEEE80211_DEV_TO_SUB_IF(dev);
 		sdata->u.mntr_flags = *flags;
 		/*
-		*in cook frame mode ,we use radiotap header. 
+		*in cook frame mode ,we use radiotap header.
 		*/
 		if (sdata->u.mntr_flags & MONITOR_FLAG_COOK_FRAMES) {
 			sdata->dev->type = ARPHRD_IEEE80211_RADIOTAP;
@@ -126,7 +126,7 @@ ieee80211_add_iface(struct wiphy *wiphy,
 #endif
 }
 
-static int ieee80211_del_iface(struct wiphy *wiphy, 
+static int ieee80211_del_iface(struct wiphy *wiphy,
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,6,0))
 	struct wireless_dev *wdev
 #else
@@ -197,7 +197,7 @@ static int ieee80211_change_iface(struct wiphy *wiphy,
 		}
 
 		/*
-		*in cook frame mode ,we use radiotap header. 
+		*in cook frame mode ,we use radiotap header.
 		*/
 		if (sdata->u.mntr_flags & MONITOR_FLAG_COOK_FRAMES) {
 			sdata->dev->type = ARPHRD_IEEE80211_RADIOTAP;
@@ -211,7 +211,7 @@ int atbm_change_iface_to_monitor(struct net_device *dev)
 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
 	struct ieee80211_local *local = sdata->local;
 	struct ieee80211_hw *hw = &local->hw;
-	
+
 #if (LINUX_VERSION_CODE <= KERNEL_VERSION(4, 14, 0))
 	return ieee80211_change_iface(hw->wiphy, dev, NL80211_IFTYPE_MONITOR, NULL, NULL);
 #else
@@ -220,7 +220,10 @@ int atbm_change_iface_to_monitor(struct net_device *dev)
 }
 
 static int ieee80211_add_key(struct wiphy *wiphy, struct net_device *dev,
-			     int link_id, u8 key_idx, bool pairwise, const u8 *mac_addr,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
+			     int link_id,
+#endif
+			     u8 key_idx, bool pairwise, const u8 *mac_addr,
 			     struct key_params *params)
 {
 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
@@ -487,8 +490,8 @@ static void sta_set_sinfo(struct sta_info *sta, struct station_info *sinfo)
 			BIT(NL80211_STA_INFO_RX_BITRATE) |
 			BIT(NL80211_STA_INFO_RX_DROP_MISC) |
 			BIT(NL80211_STA_INFO_BSS_PARAM) |
-			BIT(NL80211_STA_INFO_CONNECTED_TIME) | 
-			BIT(NL80211_STA_INFO_STA_FLAGS) 
+			BIT(NL80211_STA_INFO_CONNECTED_TIME) |
+			BIT(NL80211_STA_INFO_STA_FLAGS)
 			;
 #endif
 	do_posix_clock_monotonic_gettime(&uptime);
@@ -505,7 +508,7 @@ static void sta_set_sinfo(struct sta_info *sta, struct station_info *sinfo)
 
 	if ((sta->local->hw.flags & IEEE80211_HW_SIGNAL_DBM) ||
 	    (sta->local->hw.flags & IEEE80211_HW_SIGNAL_UNSPEC)) {
-	   	#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0))
+		#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0))
 		sinfo->filled |= STATION_INFO_SIGNAL | STATION_INFO_SIGNAL_AVG;
 		#else
 		sinfo->filled |= BIT(NL80211_STA_INFO_SIGNAL) | BIT(NL80211_STA_INFO_SIGNAL_AVG);
@@ -518,7 +521,7 @@ static void sta_set_sinfo(struct sta_info *sta, struct station_info *sinfo)
 	if (sta->last_tx_rate.flags & IEEE80211_TX_RC_MCS)
 		sinfo->txrate.flags |= RATE_INFO_FLAGS_MCS;
 	if (sta->last_tx_rate.flags & IEEE80211_TX_RC_40_MHZ_WIDTH)
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0))		
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0))
 		sinfo->txrate.flags |= RATE_INFO_FLAGS_40_MHZ_WIDTH;
 #else
 		sinfo->txrate.bw = RATE_INFO_BW_40;
@@ -531,7 +534,7 @@ static void sta_set_sinfo(struct sta_info *sta, struct station_info *sinfo)
 	if (sta->last_rx_rate_flag & RX_FLAG_HT)
 		sinfo->rxrate.flags |= RATE_INFO_FLAGS_MCS;
 	if (sta->last_rx_rate_flag & RX_FLAG_40MHZ)
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0))		
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0))
 		sinfo->txrate.flags |= RATE_INFO_FLAGS_40_MHZ_WIDTH;
 #else
 		sinfo->txrate.bw = RATE_INFO_BW_40;
@@ -553,7 +556,7 @@ static void sta_set_sinfo(struct sta_info *sta, struct station_info *sinfo)
 		sinfo->plink_state = sta->plink_state;
 	}
 #endif
-	
+
 	sinfo->bss_param.flags = 0;
 	if (sdata->vif.bss_conf.use_cts_prot)
 		sinfo->bss_param.flags |= BSS_PARAM_FLAGS_CTS_PROT;
@@ -563,7 +566,7 @@ static void sta_set_sinfo(struct sta_info *sta, struct station_info *sinfo)
 		sinfo->bss_param.flags |= BSS_PARAM_FLAGS_SHORT_SLOT_TIME;
 	sinfo->bss_param.dtim_period = sdata->vif.bss_conf.ps_dtim_period;
 	sinfo->bss_param.beacon_interval = sdata->vif.bss_conf.beacon_int;
-	
+
 	#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 1, 0))
 	sinfo->sta_flags.set = 0;
 	sinfo->sta_flags.mask = BIT(NL80211_STA_FLAG_AUTHORIZED) |
@@ -631,24 +634,24 @@ static int ieee80211_get_station(struct wiphy *wiphy, struct net_device *dev,
 }
 static void ieee80211_config_ap_cap(struct ieee80211_sub_if_data *sdata,u8 * ie, size_t len)
 {
-	if(ie == NULL  || len <= 0){
+	if (ie == NULL  || len <= 0) {
 		return;
 	}
 	/*
 	*p2p
 	*/
-	if(sdata->vif.p2p == true){
+	if (sdata->vif.p2p == true) {
 		struct ieee802_atbm_11_elems elems;
 
 		ieee802_11_parse_elems(ie,len, &elems);
 
-		if(elems.ht_cap_elem){
-			elems.ht_cap_elem->cap_info &= ~(IEEE80211_HT_CAP_SUP_WIDTH_20_40 | 
+		if (elems.ht_cap_elem) {
+			elems.ht_cap_elem->cap_info &= ~(IEEE80211_HT_CAP_SUP_WIDTH_20_40 |
 		           IEEE80211_HT_CAP_DSSSCCK40 |
 		           IEEE80211_HT_CAP_SGI_40);
 		}
 
-		if(elems.ht_info_elem){
+		if (elems.ht_info_elem) {
 			elems.ht_info_elem->ht_param &= ~(BIT(0) | BIT(1) | BIT(2));
 		}
 	}
@@ -658,7 +661,7 @@ static void ieee80211_config_ap_ssid(struct ieee80211_sub_if_data *sdata,
 {
 	struct ieee80211_bss_conf *bss_conf = &sdata->vif.bss_conf;
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 1, 0))
-	if(params->ssid_len&&params->ssid){
+	if (params->ssid_len && params->ssid) {
 		bss_conf->ssid_len = params->ssid_len;
 
 		if (params->ssid_len)
@@ -672,7 +675,7 @@ static void ieee80211_config_ap_ssid(struct ieee80211_sub_if_data *sdata,
 		struct sk_buff *skb;
 		int offset = 0;
 		const u8 *ssidie = NULL;
-		
+
 		skb = ieee80211_beacon_get(&sdata->local->hw, &sdata->vif);
 		if (WARN_ON(!skb))
 			return ;
@@ -684,7 +687,7 @@ static void ieee80211_config_ap_ssid(struct ieee80211_sub_if_data *sdata,
 		if (ssidie) {
 			bss_conf->ssid_len = ssidie[1];
 			memcpy(bss_conf->ssid, &ssidie[2], bss_conf->ssid_len);
-			if(IEEE80211_MAX_SSID_LEN>bss_conf->ssid_len){
+			if (IEEE80211_MAX_SSID_LEN>bss_conf->ssid_len) {
 				bss_conf->ssid[bss_conf->ssid_len]=0;
 			}
 		} else {
@@ -796,7 +799,7 @@ static int ieee80211_config_beacon(struct ieee80211_sub_if_data *sdata,
 		call_rcu(&old->rcu_head, free_old_beacon);
 
 	ieee80211_config_ap_cap(sdata,new->tail,new->tail_len);
-	
+
 	ieee80211_config_ap_ssid(sdata, params);
 
 	ieee80211_bss_info_change_notify(sdata, BSS_CHANGED_BEACON_ENABLED |
@@ -835,7 +838,7 @@ static int ieee80211_config_proberesp(struct ieee80211_sub_if_data *sdata,
 		new_head_len = params->head_len;
 	else
 		new_head_len = old->head_len;
-	
+
 	#if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 1, 0))
 		proberesp_ies = NULL;
 		proberesp_ies_len = 0;
@@ -888,7 +891,7 @@ static int ieee80211_config_proberesp(struct ieee80211_sub_if_data *sdata,
 	 */
 	new->proberesp_data_ies = new->tail + new->tail_len;
 	new->proberesp_data_ies_len = new_proberesp_data_ies_len;
-	
+
 
 	/* copy in optional probe response ies */
 	if (proberesp_ies)
@@ -912,12 +915,12 @@ static int ieee80211_config_associate_ie(struct ieee80211_sub_if_data *sdata,
 {
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 1, 0))
 	struct associate_data *new, *old;
-	if((!params->assocresp_ies)||(!params->assocresp_ies_len))
+	if ((!params->assocresp_ies) || (!params->assocresp_ies_len))
 		return 0;
 	old = rtnl_dereference(sdata->u.ap.associate_ie);
 
 	new = atbm_kzalloc(sizeof(struct associate_data)+params->assocresp_ies_len, GFP_KERNEL);
-	if(!new)
+	if (!new)
 		return -ENOMEM;
 	new->associate_ies = ((u8*)new)+sizeof(struct associate_data);
 	new->associate_ies_len = params->assocresp_ies_len;
@@ -925,9 +928,9 @@ static int ieee80211_config_associate_ie(struct ieee80211_sub_if_data *sdata,
 	memcpy(new->associate_ies,params->assocresp_ies,params->assocresp_ies_len);
 
 	rcu_assign_pointer(sdata->u.ap.associate_ie, new);
-	
+
 	synchronize_rcu();
-	if(old)
+	if (old)
 		atbm_kfree(old);
 #endif
 	return 0;
@@ -1058,7 +1061,7 @@ static int ieee80211_start_ap(struct wiphy *wiphy, struct net_device *dev,
 	struct ieee80211_channel *chan = NULL;
 	struct ieee80211_sub_if_data *sdata;
 #endif
-	
+
 	memset(&params,0,sizeof(struct beacon_parameters));
 	BEACON_PARAMS_CPY(params,&(settings->beacon));
 	params.interval = settings->beacon_interval;
@@ -1077,17 +1080,17 @@ static int ieee80211_start_ap(struct wiphy *wiphy, struct net_device *dev,
 	chtype = cfg80211_get_chandef_type(&settings->chandef);
 	chan = settings->chandef.chan;
 #endif
-	sdata = IEEE80211_DEV_TO_SUB_IF(dev);	
-	if(sdata->vif.p2p == true){
+	sdata = IEEE80211_DEV_TO_SUB_IF(dev);
+	if (sdata->vif.p2p == true) {
 		chtype = NL80211_CHAN_HT20;
 	}
-	if(ieee80211_set_channel(wiphy,dev,chan,chtype))
+	if (ieee80211_set_channel(wiphy,dev,chan,chtype))
 	{
 		atbm_printk_err("set channel err\n");
 		return -EBUSY;
 	}
 #endif
-	return ieee80211_add_beacon(wiphy,dev,&params);	
+	return ieee80211_add_beacon(wiphy,dev,&params);
 }
 static  int ieee80211_change_beacon(struct wiphy *wiphy, struct net_device *dev,
 									   struct cfg80211_beacon_data *info)
@@ -1135,13 +1138,13 @@ static int ieee80211_del_beacon(struct wiphy *wiphy, struct net_device *dev,unsi
 	old_assoc = rtnl_dereference(sdata->u.ap.associate_ie);
 	rcu_assign_pointer(sdata->u.ap.associate_ie, NULL);
 	synchronize_rcu();
-	if(old_assoc)
+	if (old_assoc)
 		atbm_kfree(old_assoc);
 #endif
 	old_extra = rtnl_dereference(sdata->u.ap.beacon_extra);
 	rcu_assign_pointer(sdata->u.ap.beacon_extra, NULL);
 	synchronize_rcu();
-	if(old_extra)
+	if (old_extra)
 		atbm_kfree(old_extra);
 #ifdef CONFIG_ATBM_RADAR_DETECT
 #ifdef CONFIG_ATBM_5G_PRETEND_2G
@@ -1256,7 +1259,7 @@ static void sta_apply_parameters(struct ieee80211_local *local,
 		else
 			clear_sta_flag(sta, WLAN_STA_TDLS_PEER);
 	}
-	
+
 	if (params->sta_modify_mask & STATION_PARAM_APPLY_UAPSD) {
 		sta->sta.uapsd_queues = params->uapsd_queues;
 		sta->sta.max_sp = params->max_sp;
@@ -1278,7 +1281,7 @@ static void sta_apply_parameters(struct ieee80211_local *local,
 
 	if (params->listen_interval >= 0)
 		sta->listen_interval = params->listen_interval;
-
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
 	if (params->link_sta_params.supported_rates) {
 		rates = 0;
 
@@ -1292,17 +1295,38 @@ static void sta_apply_parameters(struct ieee80211_local *local,
 		sta->sta.supp_rates[chan_state->oper_channel->band] = rates;
 	}
 
-	if (params->link_sta_params.ht_capa){
+	if (params->link_sta_params.ht_capa) {
 		ieee80211_ht_cap_ie_to_sta_ht_cap(sband,
 						  params->link_sta_params.ht_capa,
 						  &sta->sta.ht_cap);
 		ieee80211_ht_cap_to_sta_channel_type(sta);
 	}
-	if(sta->sta.ht_cap.ht_supported){
+#else
+	if (params->supported_rates) {
+		rates = 0;
+
+		for (i = 0; i < params->supported_rates_len; i++) {
+			int rate = (params->supported_rates[i] & 0x7f) * 5;
+			for (j = 0; j < sband->n_bitrates; j++) {
+				if (sband->bitrates[j].bitrate == rate)
+					rates |= BIT(j);
+			}
+		}
+		sta->sta.supp_rates[chan_state->oper_channel->band] = rates;
+	}
+
+	if (params->ht_capa) {
+		ieee80211_ht_cap_ie_to_sta_ht_cap(sband,
+						  params->ht_capa,
+						  &sta->sta.ht_cap);
+		ieee80211_ht_cap_to_sta_channel_type(sta);
+	}
+#endif
+	if (sta->sta.ht_cap.ht_supported) {
 		set_sta_flag(sta, WLAN_STA_WME);
 		sta->sta.wme = true;
 	}
-	
+
 #ifdef IPC_AP_USED_11G_NO_RTS
 	sta->sta.ht_cap.ht_supported = false;
 #endif
@@ -1337,7 +1361,7 @@ static int ieee80211_add_station(struct wiphy *wiphy, struct net_device *dev,
 				u8 *mac,
 				#else
 				const u8 *mac,
-				#endif 
+				#endif
 				struct station_parameters *params)
 {
 #ifndef ATBM_AP_SME
@@ -1361,7 +1385,7 @@ static int ieee80211_add_station(struct wiphy *wiphy, struct net_device *dev,
 
 	if (is_multicast_ether_addr(mac))
 		return -EINVAL;
-	
+
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 1, 0))
 	/* Only TDLS-supporting stations can add TDLS peers */
 	if ((params->sta_flags_set & BIT(NL80211_STA_FLAG_TDLS_PEER)) &&
@@ -1369,7 +1393,7 @@ static int ieee80211_add_station(struct wiphy *wiphy, struct net_device *dev,
 	      sdata->vif.type == NL80211_IFTYPE_STATION))
 		return -ENOTSUPP;
 #endif
-	
+
 	sta = sta_info_alloc(sdata, (u8 *)mac, GFP_KERNEL);
 	if (!sta)
 		return -ENOMEM;
@@ -1423,18 +1447,17 @@ static int ieee80211_del_station(struct wiphy *wiphy, struct net_device *dev,
 
 	sta_info_flush(local, sdata);
 	#else
-	if(mac){
+	if (mac) {
 		struct sta_info * sta = NULL;
 		bool deauthen_sta =false;
 		bool free_sta = false;
 		rcu_read_lock();
 		sta = sta_info_get_rx(sdata, mac);
-		if(sta)
-		{
+		if (sta) {
 			atbm_printk_cfg("%s:mac(%pM),AUTH(%d),DEAUTHENNING(%d)\n",__func__,mac,test_sta_flag(sta, WLAN_STA_AUTH),
 				test_sta_flag(sta, WLAN_STA_DEAUTHENNING));
-			if(test_sta_flag(sta, WLAN_STA_AUTH)){
-				if(!test_sta_flag(sta, WLAN_STA_DEAUTHENNING)){
+			if (test_sta_flag(sta, WLAN_STA_AUTH)) {
+				if (!test_sta_flag(sta, WLAN_STA_DEAUTHENNING)) {
 					set_sta_flag(sta,WLAN_STA_DEAUTHENNING);
 					deauthen_sta = true;
 				}
@@ -1444,14 +1467,14 @@ static int ieee80211_del_station(struct wiphy *wiphy, struct net_device *dev,
 		}
 		rcu_read_unlock();
 
-		if(deauthen_sta == true){
+		if (deauthen_sta == true) {
 			ieee80211_ap_sme_queue_event(sdata,STA_EVENT__SEND_DEAUTHEN,mac);
 			ieee80211_ap_sme_sta_sync_lock(sdata);
 		}
 
-		if(free_sta == true)
+		if (free_sta == true)
 			ieee80211_ap_sme_queue_event(sdata,STA_EVENT__FREE,mac);
-	}else{
+	} else {
 		atbm_printk_cfg("%s:deauthen all sta\n",__func__);
 	}
 	#endif
@@ -1844,7 +1867,7 @@ static int ieee80211_change_bss(struct wiphy *wiphy,
 		sdata->vif.bss_conf.use_cts_prot = params->use_cts_prot;
 		changed |= BSS_CHANGED_ERP_CTS_PROT;
 	}
-	if (params->use_short_preamble >= 0) {		
+	if (params->use_short_preamble >= 0) {
 		sdata->vif.bss_conf.use_short_preamble =
 			params->use_short_preamble;
 		changed |= BSS_CHANGED_ERP_PREAMBLE;
@@ -1916,19 +1939,18 @@ static int ieee80211_set_txq_params(struct wiphy *wiphy,
 
 	if (local->hw.queues < IEEE80211_NUM_ACS)
 		return -EOPNOTSUPP;
-	
+
 	#if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 1, 0))
 	list_for_each_entry(sdata, &local->interfaces, list)
-		 if ((sdata->vif.type == NL80211_IFTYPE_AP)||(sdata->vif.type == NL80211_IFTYPE_P2P_GO))
-		 	break;
-	
-	if(sdata == NULL)
-	{
+		if ((sdata->vif.type == NL80211_IFTYPE_AP) || (sdata->vif.type == NL80211_IFTYPE_P2P_GO))
+			break;
+
+	if (sdata == NULL) {
 		atbm_printk_err("txq_params:sdata == NULL\n");
 		return -EOPNOTSUPP;
 	}
 	#endif
-	
+
 	memset(&p, 0, sizeof(p));
 	p.aifs = params->aifs;
 	p.cw_max = params->cwmax;
@@ -1967,23 +1989,23 @@ static int __ieee80211_set_channel(struct wiphy *wiphy,
 	enum nl80211_channel_type old_oper_type;
 	enum nl80211_channel_type old_vif_oper_type= NL80211_CHAN_NO_HT;
 	u32 changed = 0;
-	
-	if(netdev) {
+
+	if (netdev) {
 		sdata = IEEE80211_DEV_TO_SUB_IF(netdev);
-	}else {
+	} else {
 		atbm_printk_cfg("%s:set monitor interface channel\n",__func__);
 		sdata = local->monitor_sdata;
 	}
 
-	if(sdata == NULL)
+	if (sdata == NULL)
 	{
 		return -EOPNOTSUPP;
 	}
-	if((sdata->vif.type == NL80211_IFTYPE_MONITOR) &&
-	  !(sdata->u.mntr_flags & MONITOR_FLAG_COOK_FRAMES)){
+	if ((sdata->vif.type == NL80211_IFTYPE_MONITOR) &&
+	  !(sdata->u.mntr_flags & MONITOR_FLAG_COOK_FRAMES)) {
 		changed = IEEE80211_CONF_CHANGE_MONITOR;
 	}
-	chan_state = ieee80211_get_channel_state(local, sdata); 
+	chan_state = ieee80211_get_channel_state(local, sdata);
 
 	switch (ieee80211_get_channel_mode(local, sdata)) {
 	case CHAN_MODE_HOPPING:
@@ -1991,12 +2013,12 @@ static int __ieee80211_set_channel(struct wiphy *wiphy,
 	case CHAN_MODE_FIXED:
 		if (!sdata && chan_state->_oper_channel_type == channel_type)
 			return 0;
-		if(chan_state->oper_channel != chan)
+		if (chan_state->oper_channel != chan)
 			goto __channel_busy;
-		if(chan_state->_oper_channel_type != channel_type){
+		if (chan_state->_oper_channel_type != channel_type) {
 			char request_type = ieee80211_chw_is_ht40(channel_type);
 			char oper_type = ieee80211_chw_is_ht40(chan_state->_oper_channel_type);
-			if((request_type == oper_type)&&(request_type == 1))
+			if ((request_type == oper_type) && (request_type == 1))
 				goto __channel_busy;
 		}
 		break;
@@ -2026,8 +2048,8 @@ static int __ieee80211_set_channel(struct wiphy *wiphy,
 	return 0;
 __channel_busy:
 #ifdef CONFIG_ATBM_AP_CHANNEL_CHANGE_EVENT
-	if(sdata->vif.type == NL80211_IFTYPE_AP){
-	
+	if (sdata->vif.type == NL80211_IFTYPE_AP) {
+
 		//send AP channel event , this is delay work ,because hostapd may have not been setup, we must wait it
 
 		ieee80211_queue_delayed_work(&sdata->local->hw,
@@ -2037,7 +2059,7 @@ __channel_busy:
 		 return 0;
 	}
 #endif //#ifdef CONFIG_ATBM_AP_CHANNEL_CHANGE_EVENT
-	
+
 	return -EBUSY;
 }
 int ieee80211_set_channel(struct wiphy *wiphy,
@@ -2048,9 +2070,9 @@ int ieee80211_set_channel(struct wiphy *wiphy,
 	struct ieee80211_local *local = wiphy_priv(wiphy);
 	int ret = 0;
 	mutex_lock(&local->mtx);
-	if(netdev){
+	if (netdev) {
 		struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(netdev);
-		if(sdata->vif.p2p == true){
+		if (sdata->vif.p2p == true) {
 			channel_type = NL80211_CHAN_HT20;
 		}
 	}
@@ -2076,7 +2098,7 @@ static int ieee80211_set_monitor_channel(struct wiphy *wiphy,
 					 enum nl80211_channel_type channel_type)
 {
 	return ieee80211_set_channel(wiphy, NULL, chan, channel_type);
-}	
+}
 #endif
 #ifdef CONFIG_PM
 static int ieee80211_suspend(struct wiphy *wiphy,
@@ -2106,17 +2128,17 @@ static int ieee80211_scan(struct wiphy *wiphy
 #endif
 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
 
-	//if(ETF_Test_is_Start()||(g_connetting)){
-	if(ETF_Test_is_Start()){
+	//if (ETF_Test_is_Start() || (g_connetting)) {
+	if (ETF_Test_is_Start()) {
 		atbm_printk_err("ieee80211_scan drop ETF_bStartTx/Rx\n");
 		return -EBUSY;
 	}
-	if(atbm_ieee80211_suspend(sdata->local)==true){
-		
+	if (atbm_ieee80211_suspend(sdata->local) == true) {
+
 		atbm_printk_err("ieee80211_scan drop:suspend\n");
 		return -EBUSY;
 	}
-	if(sdata->local->adaptive_started == true && time_is_after_jiffies(sdata->local->adaptive_started_time+(5*60*HZ))){
+	if (sdata->local->adaptive_started == true && time_is_after_jiffies(sdata->local->adaptive_started_time+(5*60*HZ))) {
 		atbm_printk_err("%s:adaptive runing\n",__func__);
 		return -EBUSY;
 	}
@@ -2141,7 +2163,7 @@ static int ieee80211_scan(struct wiphy *wiphy
 		 */
 #else
 		break;
-#endif	
+#endif
 	case NL80211_IFTYPE_AP:
 		if (sdata->u.ap.beacon)
 			return -EOPNOTSUPP;
@@ -2149,8 +2171,8 @@ static int ieee80211_scan(struct wiphy *wiphy
 	default:
 		return -EOPNOTSUPP;
 	}
-	if(sdata->local->only_monitors){
-		if(sdata->local->monitor_sdata){
+	if (sdata->local->only_monitors) {
+		if (sdata->local->monitor_sdata) {
 			atbm_printk_err("[%s] in monitor mode,cannot scan\n",sdata->local->monitor_sdata->name);
 		}
 		return -EOPNOTSUPP;
@@ -2165,7 +2187,7 @@ ieee80211_sched_scan_start(struct wiphy *wiphy,
 {
 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
 
-	if(ETF_Test_is_Start()){
+	if (ETF_Test_is_Start()) {
 		atbm_printk_err("ieee80211_sched_scan_start drop ETF_bStartTx/Rx\n");
 		return -EOPNOTSUPP;
 	}
@@ -2181,7 +2203,7 @@ ieee80211_sched_scan_stop(struct wiphy *wiphy, struct net_device *dev)
 {
 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
 
-	if(ETF_Test_is_Start()){
+	if (ETF_Test_is_Start()) {
 		atbm_printk_err("ieee80211_sched_scan_stop drop ETF_bStartTx/Rx\n");
 		return -EOPNOTSUPP;
 	}
@@ -2223,23 +2245,23 @@ void ieee80211_start_ap_changechannel_work(struct ieee80211_sub_if_data *ap_sdat
 	                                            IEEE80211_FCTL_TODS);
 	deauth->u.deauth.reason_code = WLAN_REASON_STA_CHANNEL_CHANGE;
 	deauth->seq_ctrl = channel;
-		
-	if((chann_type == 2) || (chann_type == 3)){
-		if(channel < 6){
+
+	if ((chann_type == 2) || (chann_type == 3)) {
+		if (channel < 6) {
 			deauth->duration = NL80211_CHAN_HT40PLUS;//3
-		}else{
+		} else {
 			deauth->duration = NL80211_CHAN_HT40MINUS;//2
 		}
-	}else
+	} else
 		deauth->duration = NL80211_CHAN_HT20;//1
 
 
 	atbm_printk_err("ieee80211_start_ap_changechannel_work deauth->duration %d\n",deauth->duration);
-/*	
-	if(chann_type == NL80211_CHAN_HT40MINUS){
+/*
+	if (chann_type == NL80211_CHAN_HT40MINUS) {
 		deauth->duration = channel-4;
 	}
-	else if(chann_type == NL80211_CHAN_HT40PLUS){
+	else if (chann_type == NL80211_CHAN_HT40PLUS) {
 		deauth->duration = channel+4;
 	}
 	else {
@@ -2266,32 +2288,31 @@ void ieee80211_start_ap_changechannel(struct wiphy *wiphy, struct ieee80211_sub_
 	struct ieee80211_local *local=sdata->local;
 	struct ieee80211_sub_if_data *ap_sdata;
 	struct ieee80211_channel *chan=req->bss->channel;
- 	enum nl80211_channel_type channel_type = NL80211_CHAN_HT20;	
+	enum nl80211_channel_type channel_type = NL80211_CHAN_HT20;
 	struct ieee80211_channel_state *chan_state = ieee80211_get_channel_state(local, sdata);
 	struct ieee80211_supported_band *sband=local->hw.wiphy->bands[chan_state->conf.channel->band];
 	const u8 *ht_information_ie=NULL;
 	struct ieee80211_ht_info *hti;
 #if (LINUX_VERSION_CODE <KERNEL_VERSION(3,10,0))
-	if(req->bss->len_proberesp_ies)
+	if (req->bss->len_proberesp_ies)
 		ht_information_ie  = 	atbm_ieee80211_find_ie(ATBM_WLAN_EID_HT_INFORMATION,req->bss->proberesp_ies,req->bss->len_proberesp_ies );
 	else
 		ht_information_ie  = 	atbm_ieee80211_find_ie(ATBM_WLAN_EID_HT_INFORMATION,req->bss->beacon_ies,req->bss->len_beacon_ies );
 #else
 
-	if(req->bss->proberesp_ies && req->bss->proberesp_ies->len)
+	if (req->bss->proberesp_ies && req->bss->proberesp_ies->len)
 		ht_information_ie  =	atbm_ieee80211_find_ie(ATBM_WLAN_EID_HT_INFORMATION,req->bss->proberesp_ies->data, req->bss->proberesp_ies->len );
-	else if(req->bss->beacon_ies && req->bss->beacon_ies->len)
+	else if (req->bss->beacon_ies && req->bss->beacon_ies->len)
 		ht_information_ie  =	atbm_ieee80211_find_ie(ATBM_WLAN_EID_HT_INFORMATION,req->bss->beacon_ies->data,req->bss->beacon_ies->len );
 
 #endif
 	//get channel type from IE
-	if(ht_information_ie){
+	if (ht_information_ie) {
 		hti = (struct ieee80211_ht_info *)&ht_information_ie[2];
-		
 
 		if ( (sband->ht_cap.cap & IEEE80211_HT_CAP_SUP_WIDTH_20_40) &&
 		    (hti->ht_param & IEEE80211_HT_PARAM_CHAN_WIDTH_ANY)) {
-			switch(hti->ht_param & IEEE80211_HT_PARAM_CHA_SEC_OFFSET) {
+			switch (hti->ht_param & IEEE80211_HT_PARAM_CHA_SEC_OFFSET) {
 			case IEEE80211_HT_PARAM_CHA_SEC_ABOVE:
 				if (!(chan->flags & IEEE80211_CHAN_NO_HT40PLUS))
 					channel_type = NL80211_CHAN_HT40PLUS;
@@ -2311,9 +2332,9 @@ void ieee80211_start_ap_changechannel(struct wiphy *wiphy, struct ieee80211_sub_
 	list_for_each_entry_rcu(ap_sdata, &local->interfaces, list) {
 		if (!ieee80211_sdata_running(ap_sdata))
 			continue;
-		if (ap_sdata==sdata)
+		if (ap_sdata == sdata)
 			continue;
-		if ((ap_sdata->vif.type != NL80211_IFTYPE_AP)){
+		if ((ap_sdata->vif.type != NL80211_IFTYPE_AP)) {
 			continue;
 		}
 		atbm_printk_err("ieee80211_start_ap_changechannel_tmp\n");
@@ -2324,9 +2345,7 @@ void ieee80211_start_ap_changechannel(struct wiphy *wiphy, struct ieee80211_sub_
 		//set channel change to hostapd
 		ieee80211_start_ap_changechannel_work(ap_sdata,channel_hw_value(chan),channel_type);
 		break;
-	}	
-
-
+	}
 }
 
 /*
@@ -2337,8 +2356,8 @@ void ieee80211_ap_setchannel_fail(struct ieee80211_sub_if_data *ap_sdata,struct 
 
 	//find AP interface , change channel
 	do {
-		
-		if ((ap_sdata->vif.type != NL80211_IFTYPE_AP)){
+
+		if ((ap_sdata->vif.type != NL80211_IFTYPE_AP)) {
 			break;
 		}
 		atbm_printk_err("ieee80211_ap_setchannel_fail\n");
@@ -2358,11 +2377,11 @@ void ieee80211_ap_channel_event_work(struct atbm_work_struct *work)
 	//	container_of(work, struct ieee80211_sub_if_data, ap_channel_event_work.work);
 	struct ieee80211_local *local=sdata->local;
 	struct ieee80211_channel_state *chan_state = ieee80211_get_channel_state(local, sdata);
-	
-	
+
+
 	atbm_printk_err("ieee80211_ap_channel_event_work\n");
 	ieee80211_ap_setchannel_fail(sdata,chan_state->oper_channel, chan_state->_oper_channel_type);
-	
+
 }
 #endif  //#ifdef CONFIG_ATBM_AP_CHANNEL_CHANGE_EVENT
 
@@ -2373,8 +2392,8 @@ static int ieee80211_auth(struct wiphy *wiphy, struct net_device *dev,
 	struct ieee80211_local *local = wiphy_priv(wiphy);
 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
 	struct ieee80211_channel_state *chan_state = ieee80211_get_channel_state(local, sdata);
-	if(atbm_ieee80211_suspend(local)==true){
-		
+	if (atbm_ieee80211_suspend(local) == true) {
+
 		atbm_printk_err("ieee80211_auth drop:suspend\n");
 		return -EBUSY;
 	}
@@ -2409,8 +2428,8 @@ static int ieee80211_assoc(struct wiphy *wiphy, struct net_device *dev,
 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
 	struct ieee80211_channel_state *chan_state = ieee80211_get_channel_state(local, sdata);
 
-	if(atbm_ieee80211_suspend(local)==true){
-		
+	if (atbm_ieee80211_suspend(local) == true) {
+
 		atbm_printk_err("ieee80211_assoc drop:suspend\n");
 		return -EBUSY;
 	}
@@ -2426,21 +2445,21 @@ static int ieee80211_assoc(struct wiphy *wiphy, struct net_device *dev,
 	}
 //	g_connetting =1;
 	LOCAL_SET_CONNECT_RUNNING(local);
-	
+
 //	del_timer_sync(&sdata->u.mgd.scan_delay_timer);
 //	mod_timer(&sdata->u.mgd.scan_delay_timer,jiffies +  msecs_to_jiffies(10000));
-	
+
 	return ieee80211_mgd_assoc(IEEE80211_DEV_TO_SUB_IF(dev), req);
 }
 
 static int ieee80211_deauth(struct wiphy *wiphy, struct net_device *dev,
 			    struct cfg80211_deauth_request *req
-			    #if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 4, 0)) 
+			    #if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 4, 0))
 			    ,void *cookie
 			    #endif
 			    )
 {
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 4, 0)) 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 4, 0))
 	void *cookie = dev->ieee80211_ptr;
 #endif
 	return ieee80211_mgd_deauth(IEEE80211_DEV_TO_SUB_IF(dev),
@@ -2449,12 +2468,12 @@ static int ieee80211_deauth(struct wiphy *wiphy, struct net_device *dev,
 
 static int ieee80211_disassoc(struct wiphy *wiphy, struct net_device *dev,
 			      struct cfg80211_disassoc_request *req
-			    #if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 4, 0)) 
+			    #if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 4, 0))
 			    ,void *cookie
 			    #endif
 			      )
 {
-	#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 4, 0)) 
+	#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 4, 0))
 	void *cookie = dev->ieee80211_ptr;
 	#endif
 	return ieee80211_mgd_disassoc(IEEE80211_DEV_TO_SUB_IF(dev),
@@ -2497,7 +2516,7 @@ static int ieee80211_leave_ibss(struct wiphy *wiphy, struct net_device *dev)
 #endif
 static int ieee80211_set_wiphy_params(struct wiphy *wiphy,
 		#if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 0, 0))
-		struct net_device *dev, 
+		struct net_device *dev,
 		#endif
 		u32 changed)
 {
@@ -2510,18 +2529,18 @@ static int ieee80211_set_wiphy_params(struct wiphy *wiphy,
 #endif
 	int err;
 	u32 bss_changed = 0;
-	
+
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 0, 0))
 	list_for_each_entry(sdata, &local->interfaces, list)
-		 if ((sdata->vif.type == NL80211_IFTYPE_AP)||(sdata->vif.type == NL80211_IFTYPE_P2P_GO))
-		 	break;
-	
-	if(sdata == NULL)
+		if ((sdata->vif.type == NL80211_IFTYPE_AP) || (sdata->vif.type == NL80211_IFTYPE_P2P_GO))
+			break;
+
+	if (sdata == NULL)
 	{
 		return -EOPNOTSUPP;
 	}
 #endif
-	
+
 	if (changed & WIPHY_PARAM_FRAG_THRESHOLD) {
 		err = drv_set_frag_threshold(local, wiphy->frag_threshold);
 
@@ -2552,7 +2571,7 @@ static int ieee80211_set_wiphy_params(struct wiphy *wiphy,
 	}
 
 	drv_bss_info_changed(local, sdata, &sdata->vif.bss_conf, bss_changed);
-#endif	
+#endif
 	return 0;
 }
 #ifdef CONFIG_ATBM_MAC80211_NO_USE
@@ -2615,7 +2634,7 @@ static int ieee80211_set_tx_power(struct wiphy *wiphy,
 	return 0;
 }
 
-static int ieee80211_get_tx_power(struct wiphy *wiphy, 
+static int ieee80211_get_tx_power(struct wiphy *wiphy,
 	#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,8,0))
 	struct wireless_dev *wdev,
 	#endif
@@ -3008,8 +3027,8 @@ static int ieee80211_start_roc_work(struct ieee80211_local *local,
 	if (local->use_chanctx && !local->ops->remain_on_channel)
 		return -EOPNOTSUPP;
 #endif
-	if(atbm_ieee80211_suspend(local)==true){
-		
+	if (atbm_ieee80211_suspend(local) == true) {
+
 		atbm_printk_err("ieee80211_start_roc_work drop:suspend\n");
 		return -EBUSY;
 	}
@@ -3037,7 +3056,7 @@ static int ieee80211_start_roc_work(struct ieee80211_local *local,
 	} else {
 		*cookie = (unsigned long)txskb;
 	}
-	
+
 	work_on = ieee80211_work_busy(local);
 	/* if there's one pending or we're scanning, queue this one */
 	if (!list_empty(&local->roc_list) || local->scanning || work_on)
@@ -3065,7 +3084,7 @@ static int ieee80211_start_roc_work(struct ieee80211_local *local,
 	BUG_ON(local->roc_pendding != NULL);
 	BUG_ON(local->roc_pendding_sdata != NULL);
 	atbm_printk_cfg("%s:roc->cookie(%llx)\n",__func__,roc->cookie);
-	
+
 #ifdef CONFIG_ATBM_STA_LISTEN
 	local->hw_roc_channel = channel;
 	__ieee80211_recalc_idle(local);
@@ -3155,7 +3174,7 @@ static int ieee80211_start_roc_work(struct ieee80211_local *local,
 			{
 				atbm_printk_cfg("%s:remain on channel time duration is not enough\n",__func__);
 			}
-		} 
+		}
 #ifdef CONFIG_ATBM_MAC80211_NO_USE
 		else if (atbm_del_timer_sync(&tmp->work.timer)) {
 			unsigned long new_end;
@@ -3186,11 +3205,11 @@ static int ieee80211_start_roc_work(struct ieee80211_local *local,
 	}
 
  out_queue:
-	if ((!queued)&&(!work_on))
+	if ((!queued) && (!work_on))
 		list_add_tail(&roc->list, &local->roc_list);
-	else if(work_on&&(!queued)&&(list_empty(&local->roc_list)))
+	else if (work_on&&(!queued)&&(list_empty(&local->roc_list)))
 	{
-		if((local->roc_pendding == NULL)&&(local->roc_pendding_sdata == NULL)){
+		if ((local->roc_pendding == NULL) && (local->roc_pendding_sdata == NULL)) {
 			local->roc_pendding = roc;
 			local->roc_pendding_sdata = sdata;
 			atbm_printk_cfg("%s:work_list is not empty, pendding remain on channel skb(%p),ch(%d)\n",
@@ -3206,7 +3225,7 @@ static int ieee80211_start_roc_work(struct ieee80211_local *local,
 			atbm_kfree(roc);
 			return -EBUSY;
 		}
-	}else if(!queued){
+	} else if (!queued) {
 		atbm_printk_cfg("%s:work_list(%d), ,cancle skb(%p),ch(%d)\n",
 				__func__,work_on,txskb,channel_hw_value(channel));
 		atbm_kfree(roc);
@@ -3231,9 +3250,9 @@ static int ieee80211_start_roc_work(struct ieee80211_local *local,
 		*cookie = (unsigned long)txskb;
 	}
 	#endif
-	if(pended == true)
+	if (pended == true)
 		atbm_printk_cfg( "%s:pended cookie(%x)\n",__func__,(unsigned int)(*cookie));
-	
+
 	atbm_printk_cfg( "%s:return cookie(%llx)\n",__func__,*cookie);
 	return 0;
 }
@@ -3262,10 +3281,10 @@ int ieee80211_start_pending_roc_work(struct ieee80211_local *local,
 	roc->mgmt_tx_cookie = (unsigned long)txskb;
 	roc->sdata = sdata;
 	roc->cookie = *cookie;
-	
+
 	ATBM_INIT_DELAYED_WORK(&roc->work, ieee80211_sw_roc_work);
 	INIT_LIST_HEAD(&roc->dependents);
-	
+
 	BUG_ON(local->scanning);
 	BUG_ON(!list_empty(&local->roc_list));
 
@@ -3325,7 +3344,7 @@ static int ieee80211_cancel_roc(struct ieee80211_local *local,
 
 	mutex_lock(&local->mtx);
 	atbm_printk_cfg("%s:cookie(%llx)\n",__func__,cookie);
-	while(local->roc_pendding&&local->roc_pendding_sdata){
+	while (local->roc_pendding && local->roc_pendding_sdata) {
 		struct ieee80211_roc_work *pendding_roc = local->roc_pendding;
 
 		if (!mgmt_tx && pendding_roc->cookie != cookie)
@@ -3428,7 +3447,7 @@ static int ieee80211_cancel_remain_on_channel(struct wiphy *wiphy,
 /*
 mgmt_tx(&rdev->wiphy, wdev, params, cookie);
 */
-static int ieee80211_mgmt_tx(struct wiphy *wiphy, 
+static int ieee80211_mgmt_tx(struct wiphy *wiphy,
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,6,0))
 			struct wireless_dev *wdev,
 			#else
@@ -3490,25 +3509,25 @@ static int ieee80211_mgmt_tx(struct wiphy *wiphy,
 	if (chan != chan_state->tmp_channel &&
 	    chan != chan_state->oper_channel)
 		is_offchan = true;
-	
+
 	#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,8,0))
 	if (channel_type_valid &&
 	    (channel_type != chan_state->tmp_channel_type &&
 	     channel_type != chan_state->_oper_channel_type))
 		is_offchan = true;
 	#endif
-	
+
 	if (chan == local->hw_roc_channel) {
 		/* TODO: check channel type? */
 		is_offchan = false;
 		flags |= IEEE80211_TX_CTL_TX_OFFCHAN;
 	}
-	
+
 	#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,2,0))
 	if (no_cck)
 		flags |= IEEE80211_TX_CTL_NO_CCK_RATE;
 	#endif
-	
+
 	if (is_offchan && !offchan)
 		return -EBUSY;
 
@@ -3537,7 +3556,7 @@ static int ieee80211_mgmt_tx(struct wiphy *wiphy,
 #ifdef CONFIG_ATBM_SUPPORT_P2P
 	case NL80211_IFTYPE_P2P_CLIENT:
 #endif
-		if (!sdata->u.mgd.associated&&(chan != local->hw_roc_channel))
+		if (!sdata->u.mgd.associated && (chan != local->hw_roc_channel))
 		{
 			is_offchan = true;
 		}
@@ -3582,7 +3601,7 @@ static int ieee80211_mgmt_tx(struct wiphy *wiphy,
 		is_offchan = true;
 	}
 	mutex_unlock(&local->mtx);
-#ifdef ATBM_P2P_CHANGE			
+#ifdef ATBM_P2P_CHANGE
 	ieee80211_parase_p2p_action_frame(sdata,skb,true);
 #endif
 	if (!is_offchan) {
@@ -4071,7 +4090,7 @@ static int ieee80211_start_radar_detection(struct wiphy *wiphy,
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 16, 0))
 	u32 cac_time_ms = 100;
 #endif
-	if(sdata->radar_required == true){
+	if (sdata->radar_required == true) {
 		atbm_printk_err("radar cac is running\n");
 		return -EBUSY;
 	}
@@ -4083,7 +4102,7 @@ static int ieee80211_start_radar_detection(struct wiphy *wiphy,
 	return err;
 }
 #endif
-#endif 
+#endif
 #endif
 struct cfg80211_ops mac80211_config_ops = {
 	.add_virtual_intf = ieee80211_add_iface,
@@ -4187,7 +4206,7 @@ struct cfg80211_ops mac80211_config_ops = {
 #endif
 #endif
 
-#ifdef CONFIG_ATBM_MAC80211_NO_USE 
+#ifdef CONFIG_ATBM_MAC80211_NO_USE
 	.dump_survey = ieee80211_dump_survey,
 	.set_tx_power = ieee80211_set_tx_power,
 	.get_tx_power = ieee80211_get_tx_power,
