@@ -99,7 +99,7 @@ modules:
 	@echo "make ARCH=$(ARCH)"
 	@echo "make OUT_DIR=$(OUT_DIR)"
 	rm -vrf $(OUT_DIR)/$(M)
-	$(MAKE) all ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) -C $(KDIR) SYS=$(sys) PLAT=$(platform) modules
+	$(MAKE) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) -C $(KDIR) SYS=$(sys) PLAT=$(platform) modules
 
 modules_install:
 	$(MAKE) INSTALL_MOD_STRIP=1 -C $(KERNEL_SRC) modules_install

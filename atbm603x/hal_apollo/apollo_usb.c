@@ -759,7 +759,7 @@ xmit:
 		atbm_printk_err("%s: submit_urb err (%d)\n",__func__,ret);		
 		usb_unanchor_urb(urb);
 		if(resubmitted == 0){
-#if ((defined (AML_KERNEL_VERSION) && AML_KERNEL_VERSION >= 15) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+#if ((defined (AML_KERNEL_VERSION) && AML_KERNEL_VERSION >= 9) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
 			atbm_printk_err("usb_wait_anchor_empty_timeout is NULL\n");
 #else
 			usb_wait_anchor_empty_timeout(&self->drvobj->ctrl_submitted,40);
@@ -856,7 +856,7 @@ static void atbm_usb_block_urbs(struct sbus_priv *self)
 	urb_unlink = self->drvobj->rx_urb;
 	for(urb_index=0;urb_index<RX_URB_NUM;urb_index++){
 		#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 9, 0)
-#if ((defined (AML_KERNEL_VERSION) && AML_KERNEL_VERSION >= 15) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+#if ((defined (AML_KERNEL_VERSION) && AML_KERNEL_VERSION >= 9) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
 		atbm_printk_init("usb_block_urb is NULL\n");
 #else
 		usb_block_urb(urb_unlink[urb_index].test_urb);
@@ -868,7 +868,7 @@ static void atbm_usb_block_urbs(struct sbus_priv *self)
 	urb_unlink = self->drvobj->tx_urb;
 	for(urb_index=0;urb_index<TX_URB_NUM;urb_index++){
 		#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 9, 0)
-#if ((defined (AML_KERNEL_VERSION) && AML_KERNEL_VERSION >= 15) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+#if ((defined (AML_KERNEL_VERSION) && AML_KERNEL_VERSION >= 9) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
 		atbm_printk_init("usb_block_urb is NULL\n");
 #else
 		usb_block_urb(urb_unlink[urb_index].test_urb);
@@ -919,7 +919,7 @@ static int atbm_usb_wait_anchor_empty_timeout(struct sbus_priv *self,int timeout
 		ret = usb_unlink_urb(urb_unlink[urb_index].test_urb);
 		atbm_printk_bus( "usb_unlink_urb[%d][%d]\n",urb_index,ret);
 	}
-#if ((defined (AML_KERNEL_VERSION) && AML_KERNEL_VERSION >= 15) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+#if ((defined (AML_KERNEL_VERSION) && AML_KERNEL_VERSION >= 9) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
 	atbm_printk_err("usb_wait_anchor_empty_timeout is NULL\n");
 #else
 	ret = usb_wait_anchor_empty_timeout(&hw_priv->sbus_priv->drvobj->rx_submitted,timeout);
@@ -935,7 +935,7 @@ static int atbm_usb_wait_anchor_empty_timeout(struct sbus_priv *self,int timeout
 		ret = usb_unlink_urb(urb_unlink[urb_index].test_urb);
 		atbm_printk_err("usb_unlink_urb[%d][%d]\n",urb_index,ret);
 	}
-#if ((defined (AML_KERNEL_VERSION) && AML_KERNEL_VERSION >= 15) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+#if ((defined (AML_KERNEL_VERSION) && AML_KERNEL_VERSION >= 9) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
 	atbm_printk_err("usb_wait_anchor_empty_timeout is NULL\n");
 #else
 	ret = usb_wait_anchor_empty_timeout(&hw_priv->sbus_priv->drvobj->tx_submitted,timeout);
@@ -2052,7 +2052,7 @@ void atbm_usb_wsm_urb_wait_timeout(struct sbus_priv *self,int timeout)
 	int ret = 0;
 	struct atbm_common *hw_priv = self->core;
 
-#if ((defined (AML_KERNEL_VERSION) && AML_KERNEL_VERSION >= 15) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+#if ((defined (AML_KERNEL_VERSION) && AML_KERNEL_VERSION >= 9) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
 	atbm_printk_err("usb_wait_anchor_empty_timeout is NULL\n");
 #else
 	ret = usb_wait_anchor_empty_timeout(wsm_anchor,timeout);
@@ -2240,7 +2240,7 @@ cmd_retry:
 		/*
 		*wait urb send
 		*/
-#if ((defined (AML_KERNEL_VERSION) && AML_KERNEL_VERSION >= 15) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+#if ((defined (AML_KERNEL_VERSION) && AML_KERNEL_VERSION >= 9) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
 		atbm_printk_err("usb_wait_anchor_empty_timeout is NULL\n");
 #else
 		status = usb_wait_anchor_empty_timeout(wsm_anchor,20000);
@@ -2261,7 +2261,7 @@ cmd_retry:
 			*/
 			usb_kill_urb(wsm_urb->test_urb);
 			wsm_release_tx_buffer_NoLock(hw_priv,1);
-#if ((defined (AML_KERNEL_VERSION) && AML_KERNEL_VERSION >= 15) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+#if ((defined (AML_KERNEL_VERSION) && AML_KERNEL_VERSION >= 9) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
 			atbm_printk_err("usb_wait_anchor_empty_timeout is NULL\n");
 #else
 			if(usb_wait_anchor_empty_timeout(wsm_anchor,20000) == 0){
@@ -2297,7 +2297,7 @@ static int atbm_usb_wait_submitted_xmited(struct sbus_priv *self)
 {
 	int status = 0;
 
-#if ((defined (AML_KERNEL_VERSION) && AML_KERNEL_VERSION >= 15) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+#if ((defined (AML_KERNEL_VERSION) && AML_KERNEL_VERSION >= 9) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
 	atbm_printk_err("usb_wait_anchor_empty_timeout is NULL\n");
 #else
 	status = usb_wait_anchor_empty_timeout(&self->drvobj->tx_submitted,10000);
@@ -4589,7 +4589,7 @@ exit:
 
 static void abtm_usb_enum_each_interface(void)
 {
-#if ((defined (AML_KERNEL_VERSION) && AML_KERNEL_VERSION >= 15) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+#if ((defined (AML_KERNEL_VERSION) && AML_KERNEL_VERSION >= 9) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
 	atbm_printk_init("abtm_usb_enum_each_interface is NULL\n");
 #else
 	usb_for_each_dev(NULL,atbm_process_each_dev);
