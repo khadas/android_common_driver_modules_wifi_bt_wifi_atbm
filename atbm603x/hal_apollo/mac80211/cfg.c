@@ -287,6 +287,9 @@ static int ieee80211_add_key(struct wiphy *wiphy, struct net_device *dev,
 }
 
 static int ieee80211_del_key(struct wiphy *wiphy, struct net_device *dev,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
+			     int link_id,
+#endif
 			     u8 key_idx, bool pairwise, const u8 *mac_addr)
 {
 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
@@ -328,6 +331,9 @@ static int ieee80211_del_key(struct wiphy *wiphy, struct net_device *dev,
 }
 
 static int ieee80211_get_key(struct wiphy *wiphy, struct net_device *dev,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
+			     int link_id,
+#endif
 			     u8 key_idx, bool pairwise, const u8 *mac_addr,
 			     void *cookie,
 			     void (*callback)(void *cookie,
@@ -422,6 +428,9 @@ static int ieee80211_get_key(struct wiphy *wiphy, struct net_device *dev,
 
 static int ieee80211_config_default_key(struct wiphy *wiphy,
 					struct net_device *dev,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
+					int link_id,
+#endif
 					u8 key_idx, bool uni,
 					bool multi)
 {
@@ -434,6 +443,9 @@ static int ieee80211_config_default_key(struct wiphy *wiphy,
 
 static int ieee80211_config_default_mgmt_key(struct wiphy *wiphy,
 					     struct net_device *dev,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
+					     int link_id,
+#endif
 					     u8 key_idx)
 {
 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
@@ -2976,6 +2988,9 @@ static int ieee80211_set_cqm_tx_fail_config(struct wiphy *wiphy,
 #ifndef CONFIG_RATE_HW_CONTROL
 static int ieee80211_set_bitrate_mask(struct wiphy *wiphy,
 				      struct net_device *dev,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
+				      unsigned int link_id,
+#endif
 				      const u8 *addr,
 				      const struct cfg80211_bitrate_mask *mask)
 {
