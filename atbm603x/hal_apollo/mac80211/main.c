@@ -55,7 +55,7 @@
 #ifdef CONFIG_IF2NAME
 #define WIFI_IF2NAME CONFIG_IF2NAME
 #else
-#define WIFI_IF2NAME "p2p%d"
+#define WIFI_IF2NAME "ap%d"
 #endif
 
 
