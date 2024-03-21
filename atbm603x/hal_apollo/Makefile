@@ -427,6 +427,7 @@ ccflags-$(SWENC) += -DCONFIG_ATBM_USE_SW_ENC
 #enable module fs
 ####################################################################
 ccflags-$(MODULEFS) += -DCONFIG_ATBM_MOULE_FS
+ccflags-$(MODULEFS) += -DATBM_LOG_LEVEL=0
 ####################################################################
 #CONFIG_ATBM_DEV_IOCTL
 #enabel dev ioctl

@@ -128,7 +128,7 @@ struct atbm_sting_s{
 *atbm log level control fs
 *
 */
-u32 atbm_printk_mask = ATBM_PRINTK_DEFAULT_MASK;
+u32 atbm_printk_mask = ATBM_LOG_LEVEL;
 module_param(atbm_printk_mask, int, 0644);
 
 struct atbm_printk_mask_table_s {
