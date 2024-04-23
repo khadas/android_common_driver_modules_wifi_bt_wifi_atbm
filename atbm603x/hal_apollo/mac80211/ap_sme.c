@@ -2079,7 +2079,9 @@ static void ieee80211_ap_sme_event_work(struct atbm_work_struct *work)
 				sinfo.assoc_req_ies = associate_ie;
 				sinfo.assoc_req_ies_len = sta->associate_ie_len;
 				sinfo.generation = ++local->sta_generation;
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0))
 				sinfo.filled = STATION_INFO_ASSOC_REQ_IES;
+#endif
 				if(sta->associate_ie){
 					atbm_kfree(sta->associate_ie);
 					sta->associate_ie = NULL;
