@@ -55,9 +55,16 @@
 #ifdef CONFIG_IF2NAME
 #define WIFI_IF2NAME CONFIG_IF2NAME
 #else
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 41))
+#if (CONFIG_AMLOGIC_KERNEL_VERSION > 13515)
 #define WIFI_IF2NAME "ap%d"
+#else
+#define WIFI_IF2NAME "p2p%d"
 #endif
-
+#else
+#define WIFI_IF2NAME "p2p%d"
+#endif
+#endif
 
 #pragma message(WIFI_IF1NAME)
 #pragma message(WIFI_IF2NAME)
@@ -1972,12 +1979,12 @@ int ieee80211_register_hw(struct ieee80211_hw *hw)
 	if (local->hw.wiphy->interface_modes & BIT(NL80211_IFTYPE_STATION)) {
 		result = ieee80211_if_add(local, WIFI_IF1NAME, NULL,
 					  NL80211_IFTYPE_STATION, NULL);
+	printk("CONFIG_AMLOGIC_KERNEL_VERSION = %d\n", CONFIG_AMLOGIC_KERNEL_VERSION);
 		if (result)
 			atbm_printk_warn("Failed to add default virtual iface\n");
 #if (ATBM_WIFI_PLATFORM != 12) && (NEED_P2P0_INTERFACE == 1)//CDLINUX no need p2p0
 		result = ieee80211_if_add(local, WIFI_IF2NAME, NULL,
 					  NL80211_IFTYPE_STATION, NULL);
-
 		if (result)
 			atbm_printk_warn("Failed to add default virtual p2p iface\n");
 #endif  //#if (ATBM_WIFI_PLATFORM == 11)

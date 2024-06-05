@@ -291,7 +291,7 @@ config NEED_P2P0_INTERFACE
 config ATBM_WIFIIF2_NAME
     string "Setting wifi interface 2 name"
     depends on (ATBM_MENUCONFIG || ATBM_APOLLO) && NEED_P2P0_INTERFACE
-    default "ap%d"
+    default "p2p%d"
     help
      set name for wireless interface 2,the length of name is must smaller than 15
 
