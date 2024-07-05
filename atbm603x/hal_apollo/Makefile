@@ -428,6 +428,7 @@ ccflags-$(SWENC) += -DCONFIG_ATBM_USE_SW_ENC
 ####################################################################
 ccflags-$(MODULEFS) += -DCONFIG_ATBM_MOULE_FS
 ccflags-$(MODULEFS) += -DATBM_LOG_LEVEL=0
+ccflags-y += -DANDROID
 ####################################################################
 #CONFIG_ATBM_DEV_IOCTL
 #enabel dev ioctl

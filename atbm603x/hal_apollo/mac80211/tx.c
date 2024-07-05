@@ -1687,7 +1687,7 @@ static void ieee80211_xmit_down_eap_rate(struct ieee80211_sub_if_data *sdata, st
 	if(sdata->vif.p2p)
 		info->flags |= IEEE80211_TX_CTL_NO_CCK_RATE;
 }
-#if 0
+#if ANDROID
 static void ieee80211_xmit_down_ipv6_rate(struct ieee80211_sub_if_data *sdata, struct sk_buff *skb)
 {
 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);

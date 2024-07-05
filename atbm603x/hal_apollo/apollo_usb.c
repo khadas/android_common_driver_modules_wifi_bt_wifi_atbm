@@ -3797,11 +3797,13 @@ static void __atbm_usb_disconnect(struct usb_interface *intf)
 		if(g_rebootSystem)
 #endif /*EXIT_MODULE_RESET_USB*/
 
+#if 0
 		if (interface_to_usbdev(intf)->state != USB_STATE_NOTATTACHED)
 		{
 			atbm_printk_exit("usb_reset_device\n");
 			usb_reset_device(interface_to_usbdev(intf));
 		}
+#endif
 
 		self->suspend = 1;
 		atbm_usb_urb_free(self,self->drvobj->rx_urb,RX_URB_NUM);
