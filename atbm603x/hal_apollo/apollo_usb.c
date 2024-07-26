@@ -3827,7 +3827,6 @@ static void __atbm_usb_disconnect(struct usb_interface *intf)
 		atbm_kfree(self->usb_data);
 		atbm_kfree(self->drvobj);
 		atbm_kfree(self);
-		atbm_kfree(dvobj);
 		atbm_usb_dvobj_assign_pointer(NULL);
 		atbm_hw_priv_assign_pointer(NULL);
 		if(pdev)
@@ -4163,6 +4162,7 @@ static int atbm_usb_suspend(struct usb_interface *intf,pm_message_t message)
 	struct dvobj_priv *dvobj = usb_get_intfdata(intf);
 	atbm_printk_pm("usb_suspend\n");
 	dvobj->self->suspend=1;
+	atbm_usb_memcpy_fromio(dvobj->self,0,NULL,RX_BUFFER_SIZE);
 	//atbm_usb_suspend_start(dvobj->self);
 	//msleep(20);
 	//atbm_usb_urb_kill(dvobj->self,dvobj->rx_urb,RX_URB_NUM);
